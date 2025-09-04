@@ -70,21 +70,29 @@ func (f *ColorFormatter) Format(results []client.Result) error {
 	}
 
 	fmt.Printf("\n%s\n", bold("=== CGMiner API Results ==="))
-	fmt.Printf("Total: %d | %s: %d | %s: %d\n\n",
-		len(results),
-		green("Success"),
-		successCount,
-		red("Failed"),
-		errorCount,
-	)
+	if f.Verbose || errorCount == 0 {
+		fmt.Printf("Total: %d | %s: %d | %s: %d\n\n",
+			len(results),
+			green("Success"),
+			successCount,
+			red("Failed"),
+			errorCount,
+		)
+	} else {
+		fmt.Printf("Total: %d | %s: %d\n\n",
+			len(results),
+			green("Success"),
+			successCount,
+		)
+	}
 
 	for _, result := range results {
 		header := fmt.Sprintf("%s:%d [%s]", result.IP, result.Port, result.Command)
 
 		if result.Error != "" {
-			fmt.Printf("%s %s\n", red("✗"), bold(header))
-			fmt.Printf("  %s: %s\n", red("Error"), result.Error)
 			if f.Verbose {
+				fmt.Printf("%s %s\n", red("✗"), bold(header))
+				fmt.Printf("  %s: %s\n", red("Error"), result.Error)
 				fmt.Printf("  %s: %s\n", cyan("Duration"), result.Duration)
 			}
 		} else {
@@ -103,7 +111,7 @@ func (f *ColorFormatter) Format(results []client.Result) error {
 	if successCount > 0 {
 		fmt.Printf("%s: %d hosts responded successfully\n", green("Success"), successCount)
 	}
-	if errorCount > 0 {
+	if errorCount > 0 && f.Verbose {
 		fmt.Printf("%s: %d hosts failed\n", red("Failed"), errorCount)
 	}
 
@@ -168,6 +176,11 @@ func (f *TableFormatter) Format(results []client.Result) error {
 	fmt.Fprintln(w, "---\t----\t-------\t------\t--------\t-------")
 
 	for _, result := range results {
+		// Skip error results if not in verbose mode
+		if result.Error != "" && !f.Verbose {
+			continue
+		}
+
 		status := "Success"
 		details := ""
 
@@ -205,8 +218,13 @@ func (f *TableFormatter) Format(results []client.Result) error {
 		}
 	}
 
-	fmt.Printf("\nSummary: Total=%d, Success=%d, Failed=%d\n",
-		len(results), successCount, errorCount)
+	if f.Verbose {
+		fmt.Printf("\nSummary: Total=%d, Success=%d, Failed=%d\n",
+			len(results), successCount, errorCount)
+	} else {
+		fmt.Printf("\nSummary: Total=%d, Success=%d\n",
+			len(results), successCount)
+	}
 
 	return nil
 }
