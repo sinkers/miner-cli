@@ -13,15 +13,15 @@ type IPRange struct {
 
 func ParseIPRange(input string) (*IPRange, error) {
 	input = strings.TrimSpace(input)
-	
+
 	if strings.Contains(input, "/") {
 		return parseCIDR(input)
 	}
-	
+
 	if strings.Contains(input, "-") {
 		return parseRange(input)
 	}
-	
+
 	ip := net.ParseIP(input)
 	if ip == nil {
 		return nil, fmt.Errorf("invalid IP address: %s", input)
@@ -34,12 +34,12 @@ func parseCIDR(cidr string) (*IPRange, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid CIDR notation: %w", err)
 	}
-	
+
 	var ips []net.IP
 	for ip := ipNet.IP.Mask(ipNet.Mask); ipNet.Contains(ip); inc(ip) {
 		ips = append(ips, duplicateIP(ip))
 	}
-	
+
 	if len(ips) > 0 && ips[0].IsUnspecified() {
 		ips = ips[1:]
 	}
@@ -49,7 +49,7 @@ func parseCIDR(cidr string) (*IPRange, error) {
 			ips = ips[:len(ips)-1]
 		}
 	}
-	
+
 	return &IPRange{IPs: ips}, nil
 }
 
@@ -58,46 +58,46 @@ func parseRange(rangeStr string) (*IPRange, error) {
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid range format, expected start-end: %s", rangeStr)
 	}
-	
+
 	startIP := net.ParseIP(strings.TrimSpace(parts[0]))
 	endIP := net.ParseIP(strings.TrimSpace(parts[1]))
-	
+
 	if startIP == nil || endIP == nil {
 		return nil, fmt.Errorf("invalid IP addresses in range: %s", rangeStr)
 	}
-	
+
 	start4 := startIP.To4()
 	end4 := endIP.To4()
-	
+
 	if start4 == nil || end4 == nil {
 		return nil, fmt.Errorf("only IPv4 ranges are supported")
 	}
-	
+
 	startInt := ipToUint32(start4)
 	endInt := ipToUint32(end4)
-	
+
 	if startInt > endInt {
 		return nil, fmt.Errorf("start IP must be less than or equal to end IP")
 	}
-	
+
 	var ips []net.IP
 	for i := startInt; i <= endInt; i++ {
 		ips = append(ips, uint32ToIP(i))
 	}
-	
+
 	return &IPRange{IPs: ips}, nil
 }
 
 func ParseMultipleRanges(inputs []string) (*IPRange, error) {
 	var allIPs []net.IP
 	seenIPs := make(map[string]bool)
-	
+
 	for _, input := range inputs {
 		r, err := ParseIPRange(input)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing %s: %w", input, err)
 		}
-		
+
 		for _, ip := range r.IPs {
 			ipStr := ip.String()
 			if !seenIPs[ipStr] {
@@ -106,7 +106,7 @@ func ParseMultipleRanges(inputs []string) (*IPRange, error) {
 			}
 		}
 	}
-	
+
 	return &IPRange{IPs: allIPs}, nil
 }
 
@@ -141,19 +141,19 @@ func isBroadcast(ip net.IP, ipNet *net.IPNet) bool {
 	if len(ip) != net.IPv4len {
 		return false
 	}
-	
+
 	ones, bits := ipNet.Mask.Size()
 	if ones == bits {
 		return false
 	}
-	
+
 	broadcast := make(net.IP, len(ipNet.IP))
 	copy(broadcast, ipNet.IP)
-	
+
 	for i := 0; i < len(broadcast); i++ {
 		broadcast[i] |= ^ipNet.Mask[i]
 	}
-	
+
 	return ip.Equal(broadcast)
 }
 
@@ -169,15 +169,15 @@ func ParsePort(portStr string) (int, error) {
 	if portStr == "" {
 		return 4028, nil
 	}
-	
+
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		return 0, fmt.Errorf("invalid port: %w", err)
 	}
-	
+
 	if port < 1 || port > 65535 {
 		return 0, fmt.Errorf("port must be between 1 and 65535")
 	}
-	
+
 	return port, nil
 }

@@ -37,14 +37,14 @@ func NewClient(timeout time.Duration, workers int) *Client {
 func (c *Client) ExecuteCommand(ctx context.Context, ips []string, port int, command string, params map[string]interface{}) []Result {
 	jobs := make(chan job, len(ips))
 	results := make(chan Result, len(ips))
-	
+
 	var wg sync.WaitGroup
-	
+
 	for i := 0; i < c.workers; i++ {
 		wg.Add(1)
 		go c.worker(ctx, &wg, jobs, results)
 	}
-	
+
 	for _, ip := range ips {
 		jobs <- job{
 			ip:      ip,
@@ -54,15 +54,15 @@ func (c *Client) ExecuteCommand(ctx context.Context, ips []string, port int, com
 		}
 	}
 	close(jobs)
-	
+
 	wg.Wait()
 	close(results)
-	
+
 	var allResults []Result
 	for r := range results {
 		allResults = append(allResults, r)
 	}
-	
+
 	return allResults
 }
 
@@ -75,7 +75,7 @@ type job struct {
 
 func (c *Client) worker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan job, results chan<- Result) {
 	defer wg.Done()
-	
+
 	for j := range jobs {
 		select {
 		case <-ctx.Done():
@@ -88,7 +88,7 @@ func (c *Client) worker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan job
 			continue
 		default:
 		}
-		
+
 		result := c.executeJob(j)
 		results <- result
 	}
@@ -96,12 +96,12 @@ func (c *Client) worker(ctx context.Context, wg *sync.WaitGroup, jobs <-chan job
 
 func (c *Client) executeJob(j job) Result {
 	start := time.Now()
-	
+
 	miner := cgminer.NewCGMiner(j.ip, j.port, c.timeout)
-	
+
 	var response interface{}
 	var err error
-	
+
 	switch j.command {
 	case "summary":
 		response, err = miner.Summary()
@@ -212,28 +212,28 @@ func (c *Client) executeJob(j job) Result {
 	default:
 		err = fmt.Errorf("unknown command: %s", j.command)
 	}
-	
+
 	duration := time.Since(start)
-	
+
 	result := Result{
 		IP:       j.ip,
 		Port:     j.port,
 		Command:  j.command,
 		Duration: duration.String(),
 	}
-	
+
 	if err != nil {
 		result.Error = err.Error()
 	} else {
 		result.Response = response
 	}
-	
+
 	return result
 }
 
 func (c *Client) customCommand(miner *cgminer.CGMiner, command string, args interface{}) (interface{}, error) {
 	ctx := context.Background()
-	
+
 	// Create the command based on whether we have parameters
 	var cmd cgminer.Command
 	if args != nil {
@@ -250,17 +250,17 @@ func (c *Client) customCommand(miner *cgminer.CGMiner, command string, args inte
 	} else {
 		cmd = cgminer.NewCommandWithoutParameter(command)
 	}
-	
+
 	respBytes, err := miner.RawCall(ctx, cmd)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var response interface{}
 	if err := json.Unmarshal(respBytes, &response); err != nil {
 		return string(respBytes), nil
 	}
-	
+
 	return response, nil
 }
 

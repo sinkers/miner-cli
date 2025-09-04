@@ -21,6 +21,7 @@ var (
 	workers      int
 	outputFormat string
 	verbose      bool
+	version      bool
 
 	poolID     int
 	poolURL    string
@@ -33,9 +34,12 @@ var (
 	customArgs string
 )
 
+const Version = "1.0.0"
+
 var rootCmd = &cobra.Command{
-	Use:   "miner-cli",
-	Short: "CGMiner API CLI - Execute commands across multiple miners",
+	Use:     "miner-cli",
+	Short:   "CGMiner API CLI - Execute commands across multiple miners",
+	Version: Version,
 	Long: `A comprehensive CLI tool for interacting with CGMiner API endpoints.
 Supports multiple IP formats including CIDR notation and ranges.
 
