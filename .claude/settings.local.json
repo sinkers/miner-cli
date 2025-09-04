@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make test:*)",
+      "Bash(make:*)",
+      "Bash(./miner-cli --help)",
+      "Bash(echo $GOPATH)",
+      "Bash(miner-cli:*)",
+      "Bash(./miner-cli scan:*)",
+      "Bash(./miner-cli:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
