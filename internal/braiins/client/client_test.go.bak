@@ -1,0 +1,660 @@
+package client
+
+import (
+	"context"
+	"net"
+	"testing"
+	"time"
+
+	pb "github.com/sinkers/miner-cli/internal/braiins/bos/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
+)
+
+const bufSize = 1024 * 1024
+
+var lis *bufconn.Listener
+
+// Mock server implementations
+
+type mockAuthServer struct {
+	pb.UnimplementedAuthenticationServiceServer
+	shouldFail bool
+}
+
+func (m *mockAuthServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
+	if m.shouldFail {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid credentials")
+	}
+	return &pb.LoginResponse{
+		Token: "test-token-12345",
+	}, nil
+}
+
+type mockMinerServer struct {
+	pb.UnimplementedMinerServiceServer
+}
+
+func (m *mockMinerServer) GetMinerDetails(ctx context.Context, req *pb.MinerDetailsRequest) (*pb.MinerDetailsResponse, error) {
+	return &pb.MinerDetailsResponse{
+		Uid: &pb.MinerUid{
+			Hostname:   "miner-001",
+			MacAddress: "00:11:22:33:44:55",
+		},
+		MinerModel: &pb.MinerModel{
+			Model:           "S19j Pro",
+			Vendor:          "Bitmain",
+			HardwareVersion: "1.0.0",
+		},
+		FirmwareVersion: &pb.FirmwareVersion{
+			Firmware: "2024.01.15",
+			Bos:      "24.02",
+			BosMode:  "plus",
+		},
+	}, nil
+}
+
+func (m *mockMinerServer) GetMinerStats(ctx context.Context, req *pb.MinerStatsRequest) (*pb.MinerStatsResponse, error) {
+	return &pb.MinerStatsResponse{
+		Hashrate: &pb.HashrateStats{
+			Average: &pb.TeraHashrate{Value: 100.5},
+			Instant: &pb.TeraHashrate{Value: 98.2},
+			Average1M: &pb.TeraHashrate{Value: 99.8},
+			Average5M: &pb.TeraHashrate{Value: 100.1},
+			Average15M: &pb.TeraHashrate{Value: 100.3},
+			Average30M: &pb.TeraHashrate{Value: 100.4},
+			Average1H: &pb.TeraHashrate{Value: 100.5},
+			Average24H: &pb.TeraHashrate{Value: 100.2},
+		},
+		Power: &pb.Power{
+			Unit:  pb.Power_WATT,
+			Value: 3050.0,
+		},
+		Shares: &pb.Shares{
+			Accepted: 125000,
+			Rejected: 50,
+		},
+		Fans: &pb.Fans{
+			Fans: []*pb.Fan{
+				{
+					Rpm: &pb.FanRPM{Value: 6000},
+					SpeedPercent: &pb.Percent{Value: 80},
+				},
+				{
+					Rpm: &pb.FanRPM{Value: 6100},
+					SpeedPercent: &pb.Percent{Value: 82},
+				},
+			},
+		},
+		Temperature: &pb.Temperature{
+			Boards: []*pb.BoardTemperature{
+				{
+					Board: &pb.Celsius{Value: 65.0},
+					Chip: &pb.Celsius{Value: 75.0},
+				},
+				{
+					Board: &pb.Celsius{Value: 66.0},
+					Chip: &pb.Celsius{Value: 76.0},
+				},
+			},
+		},
+	}, nil
+}
+
+func (m *mockMinerServer) GetHashboards(ctx context.Context, req *pb.HashboardsRequest) (*pb.HashboardsResponse, error) {
+	return &pb.HashboardsResponse{
+		Hashboards: []*pb.Hashboard{
+			{
+				Uid:  "HB-001",
+				Slot: 0,
+				Status: &pb.HashboardStatus{
+					Status: pb.HashboardStatus_OK,
+				},
+				Hashrate: &pb.HashrateStats{
+					Average: &pb.TeraHashrate{Value: 33.5},
+				},
+				Temperature: &pb.BoardTemperature{
+					Chip: &pb.Celsius{Value: 75.0},
+				},
+				Chips: &pb.Chips{
+					Total:       126,
+					Operational: 125,
+				},
+				Voltage: &pb.Voltage{Value: 14.2},
+				Frequency: &pb.Frequency{Value: 650.0},
+			},
+			{
+				Uid:  "HB-002",
+				Slot: 1,
+				Status: &pb.HashboardStatus{
+					Status: pb.HashboardStatus_OK,
+				},
+				Hashrate: &pb.HashrateStats{
+					Average: &pb.TeraHashrate{Value: 33.5},
+				},
+				Temperature: &pb.BoardTemperature{
+					Chip: &pb.Celsius{Value: 76.0},
+				},
+				Chips: &pb.Chips{
+					Total:       126,
+					Operational: 126,
+				},
+				Voltage: &pb.Voltage{Value: 14.2},
+				Frequency: &pb.Frequency{Value: 650.0},
+			},
+			{
+				Uid:  "HB-003",
+				Slot: 2,
+				Status: &pb.HashboardStatus{
+					Status: pb.HashboardStatus_OK,
+				},
+				Hashrate: &pb.HashrateStats{
+					Average: &pb.TeraHashrate{Value: 33.5},
+				},
+				Temperature: &pb.BoardTemperature{
+					Chip: &pb.Celsius{Value: 74.0},
+				},
+				Chips: &pb.Chips{
+					Total:       126,
+					Operational: 126,
+				},
+				Voltage: &pb.Voltage{Value: 14.2},
+				Frequency: &pb.Frequency{Value: 650.0},
+			},
+		},
+	}, nil
+}
+
+type mockPoolServer struct {
+	pb.UnimplementedPoolServiceServer
+}
+
+func (m *mockPoolServer) GetPools(ctx context.Context, req *pb.PoolsRequest) (*pb.PoolsResponse, error) {
+	return &pb.PoolsResponse{
+		Groups: []*pb.PoolGroup{
+			{
+				Uid: "default",
+				Pools: []*pb.Pool{
+					{
+						Uid:     "pool-1",
+						Url:     "stratum+tcp://pool.example.com:3333",
+						User:    "wallet.worker",
+						Enabled: true,
+						Statistics: &pb.PoolStatistics{
+							Accepted: 10000,
+							Rejected: 10,
+							Stale:    5,
+							LastDifficulty: &pb.Difficulty{Value: 65536},
+						},
+					},
+					{
+						Uid:     "pool-2",
+						Url:     "stratum+tcp://backup.example.com:3333",
+						User:    "wallet.worker",
+						Enabled: true,
+						Statistics: &pb.PoolStatistics{
+							Accepted: 500,
+							Rejected: 2,
+							Stale:    1,
+							LastDifficulty: &pb.Difficulty{Value: 32768},
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+func (m *mockPoolServer) CreatePool(ctx context.Context, req *pb.CreatePoolRequest) (*pb.CreatePoolResponse, error) {
+	if req.Pool == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "pool is required")
+	}
+	return &pb.CreatePoolResponse{}, nil
+}
+
+func (m *mockPoolServer) UpdatePool(ctx context.Context, req *pb.UpdatePoolRequest) (*pb.UpdatePoolResponse, error) {
+	if req.PoolId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "pool ID is required")
+	}
+	return &pb.UpdatePoolResponse{}, nil
+}
+
+func (m *mockPoolServer) DeletePool(ctx context.Context, req *pb.DeletePoolRequest) (*pb.DeletePoolResponse, error) {
+	if req.PoolId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "pool ID is required")
+	}
+	return &pb.DeletePoolResponse{}, nil
+}
+
+func (m *mockPoolServer) EnablePool(ctx context.Context, req *pb.EnablePoolRequest) (*pb.EnablePoolResponse, error) {
+	return &pb.EnablePoolResponse{}, nil
+}
+
+func (m *mockPoolServer) DisablePool(ctx context.Context, req *pb.DisablePoolRequest) (*pb.DisablePoolResponse, error) {
+	return &pb.DisablePoolResponse{}, nil
+}
+
+type mockPerformanceServer struct {
+	pb.UnimplementedPerformanceServiceServer
+}
+
+func (m *mockPerformanceServer) GetPerformanceMode(ctx context.Context, req *pb.GetPerformanceModeRequest) (*pb.GetPerformanceModeResponse, error) {
+	return &pb.GetPerformanceModeResponse{
+		TunerMode: &pb.TunerMode{
+			Mode: &pb.TunerMode_PowerTarget{
+				PowerTarget: &pb.PowerTarget{
+					PowerTarget: &pb.Power{
+						Unit:  pb.Power_WATT,
+						Value: 3000,
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+func (m *mockPerformanceServer) SetPerformanceMode(ctx context.Context, req *pb.SetPerformanceModeRequest) (*pb.SetPerformanceModeResponse, error) {
+	if req.Mode == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "mode is required")
+	}
+	return &pb.SetPerformanceModeResponse{}, nil
+}
+
+func (m *mockPerformanceServer) SetPowerTarget(ctx context.Context, req *pb.SetPowerTargetRequest) (*pb.SetPowerTargetResponse, error) {
+	if req.PowerTarget == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "power target is required")
+	}
+	return &pb.SetPowerTargetResponse{}, nil
+}
+
+func (m *mockPerformanceServer) SetHashrateTarget(ctx context.Context, req *pb.SetHashrateTargetRequest) (*pb.SetHashrateTargetResponse, error) {
+	if req.HashrateTarget == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "hashrate target is required")
+	}
+	return &pb.SetHashrateTargetResponse{}, nil
+}
+
+type mockActionsServer struct {
+	pb.UnimplementedActionsServiceServer
+}
+
+func (m *mockActionsServer) StartMining(ctx context.Context, req *pb.StartMiningRequest) (*pb.StartMiningResponse, error) {
+	return &pb.StartMiningResponse{}, nil
+}
+
+func (m *mockActionsServer) StopMining(ctx context.Context, req *pb.StopMiningRequest) (*pb.StopMiningResponse, error) {
+	return &pb.StopMiningResponse{}, nil
+}
+
+func (m *mockActionsServer) RestartMining(ctx context.Context, req *pb.RestartMiningRequest) (*pb.RestartMiningResponse, error) {
+	return &pb.RestartMiningResponse{}, nil
+}
+
+func (m *mockActionsServer) PauseMining(ctx context.Context, req *pb.PauseMiningRequest) (*pb.PauseMiningResponse, error) {
+	return &pb.PauseMiningResponse{}, nil
+}
+
+func (m *mockActionsServer) ResumeMining(ctx context.Context, req *pb.ResumeMiningRequest) (*pb.ResumeMiningResponse, error) {
+	return &pb.ResumeMiningResponse{}, nil
+}
+
+func (m *mockActionsServer) Reboot(ctx context.Context, req *pb.RebootRequest) (*pb.RebootResponse, error) {
+	return &pb.RebootResponse{}, nil
+}
+
+func (m *mockActionsServer) Restart(ctx context.Context, req *pb.RestartRequest) (*pb.RestartResponse, error) {
+	return &pb.RestartResponse{}, nil
+}
+
+func (m *mockActionsServer) Stop(ctx context.Context, req *pb.StopRequest) (*pb.StopResponse, error) {
+	return &pb.StopResponse{}, nil
+}
+
+func (m *mockActionsServer) Start(ctx context.Context, req *pb.StartRequest) (*pb.StartResponse, error) {
+	return &pb.StartResponse{}, nil
+}
+
+// Test helper functions
+
+func bufDialer(context.Context, string) (net.Conn, error) {
+	return lis.Dial()
+}
+
+func setupTestServer(t *testing.T) *grpc.Server {
+	lis = bufconn.Listen(bufSize)
+	s := grpc.NewServer()
+	
+	// Register all mock services
+	pb.RegisterAuthenticationServiceServer(s, &mockAuthServer{})
+	pb.RegisterMinerServiceServer(s, &mockMinerServer{})
+	pb.RegisterPoolServiceServer(s, &mockPoolServer{})
+	pb.RegisterPerformanceServiceServer(s, &mockPerformanceServer{})
+	pb.RegisterActionsServiceServer(s, &mockActionsServer{})
+	
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			t.Logf("Server exited with error: %v", err)
+		}
+	}()
+	
+	return s
+}
+
+func createTestClient(t *testing.T) (*BraiinsClient, func()) {
+	s := setupTestServer(t)
+	
+	conn, err := grpc.DialContext(context.Background(), "bufnet",
+		grpc.WithContextDialer(bufDialer),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("Failed to dial bufnet: %v", err)
+	}
+	
+	client := &BraiinsClient{
+		conn:          conn,
+		host:          "test",
+		port:          50051,
+		timeout:       5 * time.Second,
+		authClient:    pb.NewAuthenticationServiceClient(conn),
+		actionsClient: pb.NewActionsServiceClient(conn),
+		minerClient:   pb.NewMinerServiceClient(conn),
+		perfClient:    pb.NewPerformanceServiceClient(conn),
+		poolClient:    pb.NewPoolServiceClient(conn),
+	}
+	
+	cleanup := func() {
+		conn.Close()
+		s.Stop()
+	}
+	
+	return client, cleanup
+}
+
+// Tests
+
+func TestNewClient(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    ClientOptions
+		wantErr bool
+	}{
+		{
+			name: "valid options",
+			opts: ClientOptions{
+				Host:     "192.168.1.100",
+				Port:     50051,
+				Username: "admin",
+				Password: "password",
+				Timeout:  30 * time.Second,
+			},
+			wantErr: false,
+		},
+		{
+			name: "missing host",
+			opts: ClientOptions{
+				Port: 50051,
+			},
+			wantErr: true,
+		},
+		{
+			name: "default port",
+			opts: ClientOptions{
+				Host: "192.168.1.100",
+			},
+			wantErr: false,
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// For actual connection tests, we'd need a real server
+			// This just tests the validation logic
+			if tt.opts.Host == "" {
+				_, err := NewClient(tt.opts)
+				if (err != nil) != tt.wantErr {
+					t.Errorf("NewClient() error = %v, wantErr %v", err, tt.wantErr)
+				}
+			}
+		})
+	}
+}
+
+func TestAuthenticate(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	err := client.Authenticate("admin", "password")
+	if err != nil {
+		t.Errorf("Authenticate() error = %v", err)
+	}
+	
+	if client.authToken != "test-token-12345" {
+		t.Errorf("Expected token 'test-token-12345', got '%s'", client.authToken)
+	}
+}
+
+func TestGetMinerDetails(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	resp, err := client.GetMinerDetails()
+	if err != nil {
+		t.Fatalf("GetMinerDetails() error = %v", err)
+	}
+	
+	if resp.Uid.Hostname != "miner-001" {
+		t.Errorf("Expected hostname 'miner-001', got '%s'", resp.Uid.Hostname)
+	}
+	
+	if resp.MinerModel.Model != "S19j Pro" {
+		t.Errorf("Expected model 'S19j Pro', got '%s'", resp.MinerModel.Model)
+	}
+}
+
+func TestGetMinerStats(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	resp, err := client.GetMinerStats()
+	if err != nil {
+		t.Fatalf("GetMinerStats() error = %v", err)
+	}
+	
+	if resp.Hashrate.Average.Value != 100.5 {
+		t.Errorf("Expected average hashrate 100.5, got %f", resp.Hashrate.Average.Value)
+	}
+	
+	if resp.Power.Value != 3050.0 {
+		t.Errorf("Expected power 3050.0, got %f", resp.Power.Value)
+	}
+	
+	if resp.Shares.Accepted != 125000 {
+		t.Errorf("Expected 125000 accepted shares, got %d", resp.Shares.Accepted)
+	}
+}
+
+func TestGetHashboards(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	resp, err := client.GetHashboards()
+	if err != nil {
+		t.Fatalf("GetHashboards() error = %v", err)
+	}
+	
+	if len(resp.Hashboards) != 3 {
+		t.Errorf("Expected 3 hashboards, got %d", len(resp.Hashboards))
+	}
+	
+	for i, hb := range resp.Hashboards {
+		if hb.Status.Status != pb.HashboardStatus_OK {
+			t.Errorf("Hashboard %d: expected status OK, got %v", i, hb.Status.Status)
+		}
+		
+		if hb.Hashrate.Average.Value != 33.5 {
+			t.Errorf("Hashboard %d: expected hashrate 33.5, got %f", i, hb.Hashrate.Average.Value)
+		}
+	}
+}
+
+func TestGetPools(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	resp, err := client.GetPools()
+	if err != nil {
+		t.Fatalf("GetPools() error = %v", err)
+	}
+	
+	if len(resp.Groups) != 1 {
+		t.Fatalf("Expected 1 pool group, got %d", len(resp.Groups))
+	}
+	
+	pools := resp.Groups[0].Pools
+	if len(pools) != 2 {
+		t.Errorf("Expected 2 pools, got %d", len(pools))
+	}
+	
+	if pools[0].Url != "stratum+tcp://pool.example.com:3333" {
+		t.Errorf("Expected pool URL 'stratum+tcp://pool.example.com:3333', got '%s'", pools[0].Url)
+	}
+}
+
+func TestPoolManagement(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	// Test CreatePool
+	pool := &pb.Pool{
+		Url:  "stratum+tcp://new.pool.com:3333",
+		User: "wallet.worker",
+	}
+	_, err := client.CreatePool(pool)
+	if err != nil {
+		t.Errorf("CreatePool() error = %v", err)
+	}
+	
+	// Test UpdatePool
+	_, err = client.UpdatePool("pool-1", pool)
+	if err != nil {
+		t.Errorf("UpdatePool() error = %v", err)
+	}
+	
+	// Test EnablePool
+	_, err = client.EnablePool("pool-1")
+	if err != nil {
+		t.Errorf("EnablePool() error = %v", err)
+	}
+	
+	// Test DisablePool
+	_, err = client.DisablePool("pool-1")
+	if err != nil {
+		t.Errorf("DisablePool() error = %v", err)
+	}
+	
+	// Test DeletePool
+	_, err = client.DeletePool("pool-1")
+	if err != nil {
+		t.Errorf("DeletePool() error = %v", err)
+	}
+}
+
+func TestGetPerformanceMode(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	resp, err := client.GetPerformanceMode()
+	if err != nil {
+		t.Fatalf("GetPerformanceMode() error = %v", err)
+	}
+	
+	powerTarget := resp.TunerMode.GetPowerTarget()
+	if powerTarget == nil {
+		t.Fatal("Expected power target mode")
+	}
+	
+	if powerTarget.PowerTarget.Value != 3000 {
+		t.Errorf("Expected power target 3000W, got %f", powerTarget.PowerTarget.Value)
+	}
+}
+
+func TestPerformanceSettings(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	// Test SetPowerTarget
+	_, err := client.SetPowerTarget(3100)
+	if err != nil {
+		t.Errorf("SetPowerTarget() error = %v", err)
+	}
+	
+	// Test SetHashrateTarget
+	_, err = client.SetHashrateTarget(110)
+	if err != nil {
+		t.Errorf("SetHashrateTarget() error = %v", err)
+	}
+}
+
+func TestMiningActions(t *testing.T) {
+	client, cleanup := createTestClient(t)
+	defer cleanup()
+	
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{"StartMining", func() error { _, err := client.StartMining(); return err }},
+		{"StopMining", func() error { _, err := client.StopMining(); return err }},
+		{"RestartMining", func() error { _, err := client.RestartMining(); return err }},
+		{"PauseMining", func() error { _, err := client.PauseMining(); return err }},
+		{"ResumeMining", func() error { _, err := client.ResumeMining(); return err }},
+		{"Reboot", func() error { _, err := client.Reboot(); return err }},
+		{"Restart", func() error { _, err := client.Restart(); return err }},
+		{"Stop", func() error { _, err := client.Stop(); return err }},
+		{"Start", func() error { _, err := client.Start(); return err }},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.fn(); err != nil {
+				t.Errorf("%s() error = %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestGetContext(t *testing.T) {
+	client := &BraiinsClient{
+		timeout:   5 * time.Second,
+		authToken: "test-token",
+	}
+	
+	ctx, cancel := client.getContext()
+	defer cancel()
+	
+	// Check that context has timeout
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Error("Expected context to have deadline")
+	}
+	
+	expectedDeadline := time.Now().Add(5 * time.Second)
+	if deadline.After(expectedDeadline.Add(1 * time.Second)) {
+		t.Error("Deadline is too far in the future")
+	}
+	
+	// Check that context has auth metadata
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		t.Fatal("Expected context to have metadata")
+	}
+	
+	auth := md.Get("authorization")
+	if len(auth) != 1 || auth[0] != "test-token" {
+		t.Errorf("Expected authorization header with 'test-token', got %v", auth)
+	}
+}

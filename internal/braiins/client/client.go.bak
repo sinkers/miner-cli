@@ -1,0 +1,425 @@
+package client
+
+import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"time"
+
+	pb "github.com/sinkers/miner-cli/internal/braiins/bos/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+)
+
+// BraiinsClient represents a client for interacting with Braiins OS+ API
+type BraiinsClient struct {
+	conn            *grpc.ClientConn
+	authToken       string
+	host            string
+	port            int
+	timeout         time.Duration
+	
+	// Service clients
+	authClient      pb.AuthenticationServiceClient
+	actionsClient   pb.ActionsServiceClient
+	configClient    pb.ConfigurationServiceClient
+	minerClient     pb.MinerServiceClient
+	perfClient      pb.PerformanceServiceClient
+	poolClient      pb.PoolServiceClient
+	coolingClient   pb.CoolingServiceClient
+	licenseClient   pb.LicenseServiceClient
+}
+
+// ClientOptions contains configuration options for the Braiins client
+type ClientOptions struct {
+	Host            string
+	Port            int
+	Username        string
+	Password        string
+	Timeout         time.Duration
+	UseTLS          bool
+	InsecureSkipVerify bool
+}
+
+// NewClient creates a new Braiins client
+func NewClient(opts ClientOptions) (*BraiinsClient, error) {
+	if opts.Host == "" {
+		return nil, fmt.Errorf("host is required")
+	}
+	
+	if opts.Port == 0 {
+		opts.Port = 50051 // Default gRPC port for Braiins OS+
+	}
+	
+	if opts.Timeout == 0 {
+		opts.Timeout = 30 * time.Second
+	}
+	
+	// Create gRPC connection
+	address := fmt.Sprintf("%s:%d", opts.Host, opts.Port)
+	
+	var dialOpts []grpc.DialOption
+	
+	if opts.UseTLS {
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: opts.InsecureSkipVerify,
+		}
+		creds := credentials.NewTLS(tlsConfig)
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+	
+	conn, err := grpc.Dial(address, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Braiins OS+ at %s: %w", address, err)
+	}
+	
+	client := &BraiinsClient{
+		conn:          conn,
+		host:          opts.Host,
+		port:          opts.Port,
+		timeout:       opts.Timeout,
+		authClient:    pb.NewAuthenticationServiceClient(conn),
+		actionsClient: pb.NewActionsServiceClient(conn),
+		configClient:  pb.NewConfigurationServiceClient(conn),
+		minerClient:   pb.NewMinerServiceClient(conn),
+		perfClient:    pb.NewPerformanceServiceClient(conn),
+		poolClient:    pb.NewPoolServiceClient(conn),
+		coolingClient: pb.NewCoolingServiceClient(conn),
+		licenseClient: pb.NewLicenseServiceClient(conn),
+	}
+	
+	// Authenticate if credentials provided
+	if opts.Username != "" && opts.Password != "" {
+		if err := client.Authenticate(opts.Username, opts.Password); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("authentication failed: %w", err)
+		}
+	}
+	
+	return client, nil
+}
+
+// Close closes the client connection
+func (c *BraiinsClient) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
+
+// getContext creates a context with timeout and authentication token
+func (c *BraiinsClient) getContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	
+	if c.authToken != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", c.authToken)
+	}
+	
+	return ctx, cancel
+}
+
+// Authentication Methods
+
+// Authenticate performs authentication with the Braiins OS+ API
+func (c *BraiinsClient) Authenticate(username, password string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+	
+	req := &pb.LoginRequest{
+		Username: username,
+		Password: password,
+	}
+	
+	resp, err := c.authClient.Login(ctx, req)
+	if err != nil {
+		return fmt.Errorf("login failed: %w", err)
+	}
+	
+	c.authToken = resp.Token
+	return nil
+}
+
+// Miner Information Methods
+
+// GetMinerDetails retrieves detailed information about the miner
+func (c *BraiinsClient) GetMinerDetails() (*pb.GetMinerDetailsResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.GetMinerDetailsRequest{}
+	return c.minerClient.GetMinerDetails(ctx, req)
+}
+
+// GetMinerStats retrieves current mining statistics
+func (c *BraiinsClient) GetMinerStats() (*pb.GetMinerStatsResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.GetMinerStatsRequest{}
+	return c.minerClient.GetMinerStats(ctx, req)
+}
+
+// GetHashboards retrieves hashboard information
+func (c *BraiinsClient) GetHashboards() (*pb.GetHashboardsResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.GetHashboardsRequest{}
+	return c.minerClient.GetHashboards(ctx, req)
+}
+
+// Pool Management Methods
+
+// GetPools retrieves configured mining pools
+func (c *BraiinsClient) GetPools() (*pb.GetPoolGroupsResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.GetPoolGroupsRequest{}
+	return c.poolClient.GetPools(ctx, req)
+}
+
+// CreatePoolGroup adds a new pool group
+func (c *BraiinsClient) CreatePoolGroup(group *pb.PoolGroup) (*pb.CreatePoolGroupResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.CreatePoolGroupRequest{
+		Group: group,
+	}
+	return c.poolClient.CreatePoolGroup(ctx, req)
+}
+
+// UpdatePoolGroup updates an existing pool group
+func (c *BraiinsClient) UpdatePoolGroup(groupID string, group *pb.PoolGroup) (*pb.UpdatePoolGroupResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.UpdatePoolGroupRequest{
+		GroupId: groupID,
+		Group:   group,
+	}
+	return c.poolClient.UpdatePoolGroup(ctx, req)
+}
+
+// RemovePoolGroup removes a pool group
+func (c *BraiinsClient) RemovePoolGroup(groupID string) (*pb.RemovePoolGroupResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.RemovePoolGroupRequest{
+		GroupId: groupID,
+	}
+	return c.poolClient.RemovePoolGroup(ctx, req)
+}
+
+// SetPoolGroups sets all pool groups at once
+func (c *BraiinsClient) SetPoolGroups(groups []*pb.PoolGroup) (*pb.SetPoolGroupsResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.SetPoolGroupsRequest{
+		Groups: groups,
+	}
+	return c.poolClient.SetPoolGroups(ctx, req)
+}
+
+// GetPoolGroups retrieves configured mining pool groups
+func (c *BraiinsClient) GetPoolGroups() (*pb.GetPoolGroupsResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.GetPoolGroupsRequest{}
+	return c.poolClient.GetPoolGroups(ctx, req)
+}
+
+// Performance Management Methods
+
+// GetPerformanceMode retrieves current performance mode settings
+func (c *BraiinsClient) GetPerformanceMode() (*pb.GetPerformanceModeResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.GetPerformanceModeRequest{}
+	return c.perfClient.GetPerformanceMode(ctx, req)
+}
+
+// SetPerformanceMode configures performance mode
+func (c *BraiinsClient) SetPerformanceMode(mode *pb.PerformanceMode) (*pb.SetPerformanceModeResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.SetPerformanceModeRequest{
+		Mode: mode,
+	}
+	return c.perfClient.SetPerformanceMode(ctx, req)
+}
+
+// SetPowerTarget sets the power consumption target
+func (c *BraiinsClient) SetPowerTarget(watts float32) (*pb.SetPowerTargetResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.SetPowerTargetRequest{
+		PowerTarget: &pb.Power{
+			Unit:  pb.Power_WATT,
+			Value: watts,
+		},
+	}
+	return c.perfClient.SetPowerTarget(ctx, req)
+}
+
+// SetHashrateTarget sets the hashrate target
+func (c *BraiinsClient) SetHashrateTarget(thps float32) (*pb.SetHashrateTargetResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.SetHashrateTargetRequest{
+		HashrateTarget: &pb.TeraHashrate{
+			Value: thps,
+		},
+	}
+	return c.perfClient.SetHashrateTarget(ctx, req)
+}
+
+// Actions Methods
+
+// StartMining starts the mining operation
+func (c *BraiinsClient) StartMining() (*pb.StartMiningResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.StartMiningRequest{}
+	return c.actionsClient.StartMining(ctx, req)
+}
+
+// StopMining stops the mining operation
+func (c *BraiinsClient) StopMining() (*pb.StopMiningResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.StopMiningRequest{}
+	return c.actionsClient.StopMining(ctx, req)
+}
+
+// RestartMining restarts the mining operation
+func (c *BraiinsClient) RestartMining() (*pb.RestartMiningResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.RestartMiningRequest{}
+	return c.actionsClient.RestartMining(ctx, req)
+}
+
+// PauseMining pauses the mining operation
+func (c *BraiinsClient) PauseMining() (*pb.PauseMiningResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.PauseMiningRequest{}
+	return c.actionsClient.PauseMining(ctx, req)
+}
+
+// ResumeMining resumes the mining operation
+func (c *BraiinsClient) ResumeMining() (*pb.ResumeMiningResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.ResumeMiningRequest{}
+	return c.actionsClient.ResumeMining(ctx, req)
+}
+
+// Reboot reboots the miner
+func (c *BraiinsClient) Reboot() (*pb.RebootResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.RebootRequest{}
+	return c.actionsClient.Reboot(ctx, req)
+}
+
+// Restart restarts BOSminer
+func (c *BraiinsClient) Restart() (*pb.RestartResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.RestartRequest{}
+	return c.actionsClient.Restart(ctx, req)
+}
+
+// Stop stops BOSminer
+func (c *BraiinsClient) Stop() (*pb.StopResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.StopRequest{}
+	return c.actionsClient.Stop(ctx, req)
+}
+
+// Start starts BOSminer
+func (c *BraiinsClient) Start() (*pb.StartResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.StartRequest{}
+	return c.actionsClient.Start(ctx, req)
+}
+
+// Configuration Methods
+
+// GetMinerConfiguration retrieves the current miner configuration
+func (c *BraiinsClient) GetMinerConfiguration() (*pb.GetMinerConfigurationResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.GetMinerConfigurationRequest{}
+	return c.configClient.GetMinerConfiguration(ctx, req)
+}
+
+// Cooling Methods
+
+// GetCooling retrieves cooling configuration and status
+func (c *BraiinsClient) GetCooling() (*pb.CoolingResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.CoolingRequest{}
+	return c.coolingClient.GetCooling(ctx, req)
+}
+
+// SetImmersionMode configures immersion cooling mode
+func (c *BraiinsClient) SetImmersionMode(enabled bool) (*pb.SetImmersionModeResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.SetImmersionModeRequest{
+		Enabled: enabled,
+	}
+	return c.coolingClient.SetImmersionMode(ctx, req)
+}
+
+// SetFanControl configures fan control settings
+func (c *BraiinsClient) SetFanControl(control *pb.FanControl) (*pb.SetFanControlResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.SetFanControlRequest{
+		Control: control,
+	}
+	return c.coolingClient.SetFanControl(ctx, req)
+}
+
+// License Methods
+
+// GetLicenseState retrieves license information
+func (c *BraiinsClient) GetLicenseState() (*pb.LicenseStateResponse, error) {
+	ctx, cancel := c.getContext()
+	defer cancel()
+	
+	req := &pb.LicenseStateRequest{}
+	return c.licenseClient.GetLicenseState(ctx, req)
+}
