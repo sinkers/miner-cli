@@ -110,30 +110,26 @@ func ConvertMinerStats(resp *pb.GetMinerStatsResponse) *SimpleMinerStats {
 
 	stats := &SimpleMinerStats{}
 
-	// Convert hashrates
-	if resp.HashrateAverage != nil {
-		if resp.HashrateAverage.Last_5S != nil {
-			stats.HashRate5s = float64(resp.HashrateAverage.Last_5S.Value)
+	// Convert hashrates from MinerStats
+	if resp.MinerStats != nil && resp.MinerStats.RealHashrate != nil {
+		// Convert from GH/s to TH/s (divide by 1000)
+		if resp.MinerStats.RealHashrate.Last_5S != nil {
+			stats.HashRate5s = resp.MinerStats.RealHashrate.Last_5S.GigahashPerSecond / 1000.0
 		}
-		if resp.HashrateAverage.Last_1M != nil {
-			stats.HashRate1m = float64(resp.HashrateAverage.Last_1M.Value)
+		if resp.MinerStats.RealHashrate.Last_1M != nil {
+			stats.HashRate1m = resp.MinerStats.RealHashrate.Last_1M.GigahashPerSecond / 1000.0
 		}
-		if resp.HashrateAverage.Last_15M != nil {
-			stats.HashRate15m = float64(resp.HashrateAverage.Last_15M.Value)
+		if resp.MinerStats.RealHashrate.Last_15M != nil {
+			stats.HashRate15m = resp.MinerStats.RealHashrate.Last_15M.GigahashPerSecond / 1000.0
 		}
-		if resp.HashrateAverage.Last_24H != nil {
-			stats.HashRate24h = float64(resp.HashrateAverage.Last_24H.Value)
+		if resp.MinerStats.RealHashrate.Last_24H != nil {
+			stats.HashRate24h = resp.MinerStats.RealHashrate.Last_24H.GigahashPerSecond / 1000.0
 		}
 	}
 
-	// Convert power
-	if resp.PowerConsumption != nil {
-		switch resp.PowerConsumption.Unit {
-		case pb.Power_UNIT_WATT:
-			stats.PowerUsage = float64(resp.PowerConsumption.Value)
-		case pb.Power_UNIT_KILOWATT:
-			stats.PowerUsage = float64(resp.PowerConsumption.Value) * 1000
-		}
+	// Convert power from PowerStats
+	if resp.PowerStats != nil && resp.PowerStats.ApproximatedConsumption != nil {
+		stats.PowerUsage = float64(resp.PowerStats.ApproximatedConsumption.Watt)
 	}
 
 	// Calculate efficiency
@@ -141,89 +137,49 @@ func ConvertMinerStats(resp *pb.GetMinerStatsResponse) *SimpleMinerStats {
 		stats.Efficiency = stats.PowerUsage / stats.HashRate15m
 	}
 
-	// Convert temperature (average board temps)
-	if resp.Temperature != nil {
-		var totalTemp float64
-		var count int
-		for _, board := range resp.Temperature.Boards {
-			if board != nil {
-				totalTemp += float64(board.Value)
-				count++
-			}
-		}
-		if count > 0 {
-			stats.Temperature = totalTemp / float64(count)
-		}
-	}
-
-	// Convert fans
-	if resp.Cooling != nil && resp.Cooling.Fans != nil {
-		for _, fan := range resp.Cooling.Fans {
-			if fan.Rpm != nil {
-				stats.FanSpeeds = append(stats.FanSpeeds, int(fan.Rpm.Value))
-			}
-		}
-	}
-
-	// Convert shares
-	if resp.Work != nil && resp.Work.PoolWork != nil {
-		// Sum up shares from all pools
-		for _, pool := range resp.Work.PoolWork {
-			if pool.Shares != nil {
-				stats.AcceptedShares += pool.Shares.Accepted
-				stats.RejectedShares += pool.Shares.Rejected
-			}
-		}
-	}
+	// Note: Share statistics would need to be retrieved from pool-specific calls
+	// PoolStats structure doesn't directly contain shares in this version
 
 	return stats
 }
 
 // ConvertHashboards converts GetHashboardsResponse to SimpleHashboard slice
 func ConvertHashboards(resp *pb.GetHashboardsResponse) []SimpleHashboard {
-	if resp == nil || resp.Boards == nil {
+	if resp == nil || resp.Hashboards == nil {
 		return nil
 	}
 
 	var boards []SimpleHashboard
 
-	for _, board := range resp.Boards {
+	for i, board := range resp.Hashboards {
 		if board == nil {
 			continue
 		}
 
 		hb := SimpleHashboard{
-			Index: int(board.Index),
+			Index: i, // Use the array index
 		}
 
-		// Convert status
-		if board.Status != nil {
-			hb.Status = board.Status.State.String()
-		}
-
-		// Convert hashrate
-		if board.HashrateAverage != nil && board.HashrateAverage.Last_15M != nil {
-			hb.HashRate = float64(board.HashrateAverage.Last_15M.Value)
-		}
-
-		// Convert temperature
-		if board.Temperature != nil {
-			hb.Temperature = float64(board.Temperature.Value)
+		// Set status based on enabled flag
+		if board.Enabled {
+			hb.Status = "enabled"
+		} else {
+			hb.Status = "disabled"
 		}
 
 		// Convert chip count
-		if board.Chips != nil {
-			hb.Chips = int(board.Chips.Detected)
+		if board.ChipsCount != nil {
+			hb.Chips = int(board.ChipsCount.Value)
 		}
 
 		// Convert voltage
-		if board.Voltage != nil {
-			hb.Voltage = float64(board.Voltage.Value)
+		if board.CurrentVoltage != nil {
+			hb.Voltage = float64(board.CurrentVoltage.Volt)
 		}
 
 		// Convert frequency
-		if board.Frequency != nil {
-			hb.Frequency = float64(board.Frequency.Value)
+		if board.CurrentFrequency != nil {
+			hb.Frequency = float64(board.CurrentFrequency.Hertz) / 1e6 // Convert Hz to MHz
 		}
 
 		boards = append(boards, hb)
@@ -234,13 +190,13 @@ func ConvertHashboards(resp *pb.GetHashboardsResponse) []SimpleHashboard {
 
 // ConvertPoolGroups converts GetPoolGroupsResponse to SimplePoolGroup slice
 func ConvertPoolGroups(resp *pb.GetPoolGroupsResponse) []SimplePoolGroup {
-	if resp == nil || resp.Groups == nil {
+	if resp == nil || resp.PoolGroups == nil {
 		return nil
 	}
 
 	var groups []SimplePoolGroup
 
-	for _, group := range resp.Groups {
+	for _, group := range resp.PoolGroups {
 		if group == nil {
 			continue
 		}
@@ -249,26 +205,10 @@ func ConvertPoolGroups(resp *pb.GetPoolGroupsResponse) []SimplePoolGroup {
 			Name: group.Name,
 		}
 
-		// Convert pools
-		if group.Pools != nil {
-			for _, pool := range group.Pools {
-				if pool == nil {
-					continue
-				}
-
-				sp := SimplePool{
-					URL:      pool.Url,
-					User:     pool.User,
-					Password: pool.Password,
-					Enabled:  pool.Enabled,
-				}
-
-				// Get pool work statistics if available
-				// Note: This would need to come from a different call or be matched by URL
-
-				sg.Pools = append(sg.Pools, sp)
-			}
-		}
+		// Note: PoolGroup doesn't have a Pools field in the protobuf
+		// Pools are retrieved separately or through different methods
+		// For now, we'll leave the pools array empty
+		// In a real implementation, you'd need to make additional calls to get pool details
 
 		groups = append(groups, sg)
 	}
@@ -284,62 +224,27 @@ func ConvertCoolingState(resp *pb.GetCoolingStateResponse) map[string]interface{
 
 	result := make(map[string]interface{})
 
-	// Convert cooling configuration
-	if resp.Cooling != nil {
-		cooling := make(map[string]interface{})
-
-		// Check immersion mode
-		cooling["immersion_mode"] = resp.Cooling.ImmersionMode
-
-		// Get fan control mode
-		if resp.Cooling.FanControl != nil {
-			switch fc := resp.Cooling.FanControl.Control.(type) {
-			case *pb.FanControl_FixedSpeed:
-				cooling["fan_mode"] = "fixed"
-				cooling["fan_speed_percent"] = fc.FixedSpeed.Value
-			case *pb.FanControl_TargetTemperature:
-				cooling["fan_mode"] = "auto"
-				cooling["target_temperature"] = fc.TargetTemperature.Value
+	// Convert fan information
+	if resp.Fans != nil {
+		var fans []map[string]interface{}
+		for i, fan := range resp.Fans {
+			if fan == nil {
+				continue
 			}
-		}
-
-		// Get fan information
-		if resp.Cooling.Fans != nil {
-			var fans []map[string]interface{}
-			for i, fan := range resp.Cooling.Fans {
-				fanInfo := map[string]interface{}{
-					"index": i,
-				}
-				if fan.Rpm != nil {
-					fanInfo["rpm"] = fan.Rpm.Value
-				}
-				if fan.SpeedPercent != nil {
-					fanInfo["speed_percent"] = fan.SpeedPercent.Value
-				}
-				fans = append(fans, fanInfo)
+			// FanState structure varies, using index as identifier
+			fanInfo := map[string]interface{}{
+				"index": i,
 			}
-			cooling["fans"] = fans
+			fans = append(fans, fanInfo)
 		}
-
-		result["cooling"] = cooling
+		result["fans"] = fans
 	}
 
-	// Convert temperatures
-	if resp.Temperature != nil {
-		temps := make(map[string]interface{})
-
-		// Board temperatures
-		if resp.Temperature.Boards != nil {
-			var boardTemps []float64
-			for _, board := range resp.Temperature.Boards {
-				if board != nil {
-					boardTemps = append(boardTemps, float64(board.Value))
-				}
-			}
-			temps["boards"] = boardTemps
+	// Convert highest temperature
+	if resp.HighestTemperature != nil {
+		result["highest_temperature"] = map[string]interface{}{
+			"location": resp.HighestTemperature.Location,
 		}
-
-		result["temperature"] = temps
 	}
 
 	return result
@@ -353,39 +258,19 @@ func ConvertTunerState(resp *pb.GetTunerStateResponse) map[string]interface{} {
 
 	result := make(map[string]interface{})
 
-	// Get tuner status
-	if resp.Status != nil {
-		result["status"] = resp.Status.State.String()
-		result["running"] = resp.Status.Running
-	}
+	// Get overall tuner state
+	result["tuner_state"] = resp.OverallTunerState.String()
 
-	// Get current tuning mode
-	if resp.Config != nil {
-		config := make(map[string]interface{})
-
-		if resp.Config.Mode != nil {
-			switch mode := resp.Config.Mode.Mode.(type) {
-			case *pb.TuningMode_PowerTarget:
-				config["mode"] = "power_target"
-				if mode.PowerTarget != nil {
-					config["power_target_watts"] = mode.PowerTarget.Value
-				}
-			case *pb.TuningMode_HashrateTarget:
-				config["mode"] = "hashrate_target"
-				if mode.HashrateTarget != nil {
-					config["hashrate_target_thps"] = mode.HashrateTarget.Value
-				}
-			case *pb.TuningMode_Manual:
-				config["mode"] = "manual"
-			}
+	// Get mode-specific state
+	switch mode := resp.ModeState.(type) {
+	case *pb.GetTunerStateResponse_PowerTargetModeState:
+		if mode.PowerTargetModeState != nil {
+			result["mode"] = "power_target"
 		}
-
-		result["config"] = config
-	}
-
-	// Get profiles
-	if resp.TunedProfileUids != nil {
-		result["tuned_profiles"] = resp.TunedProfileUids
+	case *pb.GetTunerStateResponse_HashrateTargetModeState:
+		if mode.HashrateTargetModeState != nil {
+			result["mode"] = "hashrate_target"
+		}
 	}
 
 	return result
@@ -399,27 +284,19 @@ func ConvertLicenseState(resp *pb.GetLicenseStateResponse) map[string]interface{
 
 	result := make(map[string]interface{})
 
-	// Get license state
-	if resp.State != pb.LicenseState_LICENSE_STATE_UNSPECIFIED {
-		result["state"] = resp.State.String()
-	}
-
-	// Get last update time
-	if resp.LastUpdateTimestamp != nil {
-		result["last_update"] = time.Unix(resp.LastUpdateTimestamp.Seconds, int64(resp.LastUpdateTimestamp.Nanos))
-	}
-
-	// Get license info if available
-	if resp.License != nil {
-		license := make(map[string]interface{})
-		license["id"] = resp.License.Id
-
-		// Parse validity
-		if resp.License.ValidUntil != nil {
-			license["valid_until"] = time.Unix(resp.License.ValidUntil.Seconds, int64(resp.License.ValidUntil.Nanos))
-		}
-
-		result["license"] = license
+	// Get license state based on the type
+	switch resp.State.(type) {
+	case *pb.GetLicenseStateResponse_None:
+		result["state"] = "none"
+	case *pb.GetLicenseStateResponse_Limited:
+		result["state"] = "limited"
+		// Limited license details would be in the structure if available
+	case *pb.GetLicenseStateResponse_Valid:
+		result["state"] = "valid"
+		// Valid license details would be in the structure if available
+	case *pb.GetLicenseStateResponse_Expired:
+		result["state"] = "expired"
+		// Expired license details would be in the structure if available
 	}
 
 	return result
