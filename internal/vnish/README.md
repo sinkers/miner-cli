@@ -51,7 +51,7 @@ This client provides full coverage of the Vnish API including:
 ## Installation
 
 ```go
-import "github.com/yourproject/miner-cli/internal/vnish/client"
+import "github.com/sinkers/miner-cli/internal/vnish/client"
 ```
 
 ## Usage

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yourproject/miner-cli/internal/vnish/models"
+	"github.com/sinkers/miner-cli/internal/vnish/models"
 )
 
 // Client represents a vnish API client

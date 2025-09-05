@@ -41,6 +41,10 @@
   - Color formatter for terminal display
   - JSON formatter for machine-readable output
   - Table formatter for structured data
+  - SummaryTableFormatter for grouped subnet display (summary command)
+    - Groups IPs by /24 subnet
+    - Displays only: Accepted, MHS 5s, MHS av, Hardware Errors
+    - Automatically used for summary command
 
 ## DATA FLOW
 

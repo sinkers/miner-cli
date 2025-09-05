@@ -25,7 +25,7 @@ linters-settings:
   lll:
     line-length: 140
   goimports:
-    local-prefixes: github.com/yourproject/miner-cli
+    local-prefixes: github.com/sinkers/miner-cli
   gocritic:
     enabled-tags:
       - diagnostic

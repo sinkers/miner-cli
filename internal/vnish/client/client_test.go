@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yourproject/miner-cli/internal/vnish/models"
+	"github.com/sinkers/miner-cli/internal/vnish/models"
 )
 
 func TestNewClient(t *testing.T) {

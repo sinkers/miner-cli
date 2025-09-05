@@ -7,7 +7,8 @@
       "Bash(echo $GOPATH)",
       "Bash(miner-cli:*)",
       "Bash(./miner-cli scan:*)",
-      "Bash(./miner-cli:*)"
+      "Bash(./miner-cli:*)",
+      "Bash(go mod:*)"
     ],
     "deny": [],
     "ask": []

@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/yourproject/miner-cli/internal/vnish/client"
+	"github.com/sinkers/miner-cli/internal/vnish/client"
 )
 
 func main() {
