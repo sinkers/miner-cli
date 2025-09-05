@@ -2,6 +2,17 @@
 
 A comprehensive command-line tool for interacting with CGMiner API endpoints across multiple miners simultaneously. Supports IP ranges in CIDR notation and range format, with multiple output formats including colored terminal output and JSON.
 
+## Coming Soon
+
+### Extended Firmware Support
+In addition to the standard CGMiner API, support for custom firmware APIs is being developed:
+
+- **Vnish Firmware**: Full support for Vnish-specific APIs including advanced tuning, performance profiles, and extended monitoring capabilities. Implementation complete, integration pending.
+  
+- **Braiins OS+**: Comprehensive gRPC-based API support for Braiins OS+ miners including power management, performance tuning, hashboard control, and system operations. Implementation complete, integration pending.
+
+These implementations are currently available as standalone libraries in the codebase and will be integrated into the main CLI in a future release.
+
 ## Features
 
 - **Multiple IP Format Support**:
