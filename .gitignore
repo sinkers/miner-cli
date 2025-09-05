@@ -44,3 +44,12 @@ mem.prof
 # Local development
 .env
 .env.local
+
+# Claude settings
+claude-settings
+.claude-settings
+
+# Archive files
+*.tar.gz
+*.tar
+*.zip
