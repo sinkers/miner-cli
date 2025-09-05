@@ -1,4 +1,4 @@
-module github.com/yourproject/miner-cli
+module github.com/sinkers/miner-cli
 
 go 1.19
 

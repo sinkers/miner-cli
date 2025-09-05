@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/yourproject/miner-cli/internal/client"
-	"github.com/yourproject/miner-cli/internal/iprange"
-	"github.com/yourproject/miner-cli/internal/output"
+	"github.com/sinkers/miner-cli/internal/client"
+	"github.com/sinkers/miner-cli/internal/iprange"
+	"github.com/sinkers/miner-cli/internal/output"
 )
 
 var (
@@ -171,7 +171,13 @@ func executeCommand(command string) error {
 	cgClient := client.NewClient(time.Duration(timeout)*time.Second, workers)
 	results := cgClient.ExecuteCommand(ctx, ips, port, command, params)
 
-	formatter := output.GetFormatter(outputFormat, verbose)
+	// Use summary formatter for summary command unless explicitly overridden
+	formatToUse := outputFormat
+	if command == "summary" && outputFormat == "color" {
+		formatToUse = "summary"
+	}
+
+	formatter := output.GetFormatter(formatToUse, verbose)
 	return formatter.Format(results)
 }
 

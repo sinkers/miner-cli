@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yourproject/miner-cli/internal/client"
+	"github.com/sinkers/miner-cli/internal/client"
 )
 
 func captureOutput(f func()) string {

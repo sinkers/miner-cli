@@ -39,7 +39,7 @@ go build -o miner-cli
 Or install directly:
 
 ```bash
-go install github.com/yourproject/miner-cli@latest
+go install github.com/sinkers/miner-cli@latest
 ```
 
 ## Usage
@@ -276,7 +276,7 @@ Failed connections are reported but don't stop execution for other hosts.
 ### Building from Source
 
 ```bash
-git clone https://github.com/yourproject/miner-cli
+git clone https://github.com/sinkers/miner-cli
 cd miner-cli
 go mod download
 go build -o miner-cli
