@@ -45,16 +45,19 @@ Supports multiple IP formats including CIDR notation and ranges.
 
 Examples:
   # Query a single miner
-  miner-cli summary -i 192.168.1.100
+  miner-cli summary 192.168.1.100
   
   # Query multiple IP ranges
-  miner-cli devs -i 192.168.1.0/24 -i 10.0.0.1-10.0.0.50
+  miner-cli devs 192.168.1.0/24 10.0.0.1-10.0.0.50
   
   # Output as JSON
-  miner-cli stats -i 192.168.1.0/28 -o json
+  miner-cli stats 192.168.1.0/28 -o json
   
   # Add a new pool to multiple miners
-  miner-cli addpool -i 192.168.1.0/24 --url stratum+tcp://pool.example.com:3333 --user myworker --pass x`,
+  miner-cli addpool 192.168.1.0/24 --url stratum+tcp://pool.example.com:3333 --user myworker --pass x
+  
+  # Legacy format with -i flag (still supported)
+  miner-cli summary -i 192.168.1.100`,
 }
 
 func Execute() {
@@ -76,11 +79,16 @@ func init() {
 	for _, cmd := range commands {
 		cmdCopy := cmd
 		cobraCmd := &cobra.Command{
-			Use:   cmdCopy,
+			Use:   cmdCopy + " [IP_RANGES...]",
 			Short: client.GetCommandDescription(cmdCopy),
+			Args:  cobra.ArbitraryArgs,
 			PreRunE: func(c *cobra.Command, args []string) error {
+				// Combine positional args with -i flag values
+				if len(args) > 0 {
+					ipRanges = append(ipRanges, args...)
+				}
 				if len(ipRanges) == 0 {
-					return fmt.Errorf("no IP ranges specified, use -i flag")
+					return fmt.Errorf("no IP ranges specified")
 				}
 				return nil
 			},
@@ -121,11 +129,16 @@ func init() {
 	})
 
 	rootCmd.AddCommand(&cobra.Command{
-		Use:   "scan",
+		Use:   "scan [IP_RANGES...]",
 		Short: "Scan IP ranges to find active miners",
+		Args:  cobra.ArbitraryArgs,
 		PreRunE: func(c *cobra.Command, args []string) error {
+			// Combine positional args with -i flag values
+			if len(args) > 0 {
+				ipRanges = append(ipRanges, args...)
+			}
 			if len(ipRanges) == 0 {
-				return fmt.Errorf("no IP ranges specified, use -i flag")
+				return fmt.Errorf("no IP ranges specified")
 			}
 			return nil
 		},

@@ -293,21 +293,23 @@ func (f *SummaryTableFormatter) Format(results []client.Result) error {
 			hwErrors := "-"
 			
 			// Extract summary data from response
-			if respMap, ok := result.Response.(map[string]interface{}); ok {
-				if summaryList, ok := respMap["SUMMARY"].([]interface{}); ok && len(summaryList) > 0 {
-					if summary, ok := summaryList[0].(map[string]interface{}); ok {
-						if val, ok := summary["Accepted"]; ok {
-							accepted = fmt.Sprintf("%v", val)
-						}
-						if val, ok := summary["MHS 5s"]; ok {
-							mhs5s = fmt.Sprintf("%.2f", toFloat64(val))
-						}
-						if val, ok := summary["MHS av"]; ok {
-							mhsAv = fmt.Sprintf("%.2f", toFloat64(val))
-						}
-						if val, ok := summary["Hardware Errors"]; ok {
-							hwErrors = fmt.Sprintf("%v", val)
-						}
+			// The response might be a struct or a map depending on how it was processed
+			// Convert to JSON and back to map to handle both cases uniformly
+			if jsonBytes, err := json.Marshal(result.Response); err == nil {
+				var respMap map[string]interface{}
+				if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+					// Direct access to fields (for standard summary response)
+					if val, ok := respMap["Accepted"]; ok {
+						accepted = fmt.Sprintf("%v", val)
+					}
+					if val, ok := respMap["MHS 5s"]; ok {
+						mhs5s = fmt.Sprintf("%.2f", toFloat64(val))
+					}
+					if val, ok := respMap["MHS av"]; ok {
+						mhsAv = fmt.Sprintf("%.2f", toFloat64(val))
+					}
+					if val, ok := respMap["Hardware Errors"]; ok {
+						hwErrors = fmt.Sprintf("%v", val)
 					}
 				}
 			}
