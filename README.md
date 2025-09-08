@@ -75,45 +75,48 @@ miner-cli <command> -i <ip-range> [options]
 #### Information Commands
 
 ```bash
-# Get mining summary
-miner-cli summary -i 192.168.1.0/24
+# Get mining summary (new syntax)
+miner-cli summary 192.168.1.0/24
 
 # Get device information
-miner-cli devs -i 10.0.0.1-10.0.0.50
+miner-cli devs 10.0.0.1-10.0.0.50
 
-# Get pool information
-miner-cli pools -i 192.168.1.100 -i 192.168.1.101
+# Get pool information (multiple ranges)
+miner-cli pools 192.168.1.100 192.168.1.101
 
-# Get detailed statistics
-miner-cli stats -i 192.168.1.0/28 -o json
+# Get detailed statistics with JSON output
+miner-cli stats 192.168.1.0/28 -o json
 
 # Get miner version
-miner-cli version -i 10.45.0.0/20
+miner-cli version 10.45.0.0/20
 
-# Get configuration
-miner-cli config -i 192.168.1.0/24 -v
+# Get configuration with verbose output
+miner-cli config 192.168.1.0/24 -v
+
+# Legacy syntax with -i flag (still supported)
+miner-cli summary -i 192.168.1.0/24
 ```
 
 #### Pool Management
 
 ```bash
 # Add a new pool
-miner-cli addpool -i 192.168.1.0/24 \
+miner-cli addpool 192.168.1.0/24 \
   --url stratum+tcp://pool.example.com:3333 \
   --user myworker \
   --pass x
 
 # Switch to pool ID 1
-miner-cli switchpool -i 192.168.1.0/24 --pool 1
+miner-cli switchpool 192.168.1.0/24 --pool 1
 
 # Enable pool ID 2
-miner-cli enablepool -i 192.168.1.0/24 --pool 2
+miner-cli enablepool 192.168.1.0/24 --pool 2
 
 # Disable pool ID 0
-miner-cli disablepool -i 192.168.1.0/24 --pool 0
+miner-cli disablepool 192.168.1.0/24 --pool 0
 
 # Remove pool ID 3
-miner-cli removepool -i 192.168.1.0/24 --pool 3
+miner-cli removepool 192.168.1.0/24 --pool 3
 ```
 
 #### Miner Control
@@ -153,7 +156,7 @@ miner-cli custom -i 192.168.1.100 --cmd "asc" --args '{"parameter": "0"}'
 miner-cli list
 
 # Scan IP ranges for active miners
-miner-cli scan -i 192.168.1.0/24 -i 10.0.0.0/24
+miner-cli scan 192.168.1.0/24 10.0.0.0/24
 ```
 
 ### Examples
@@ -161,6 +164,10 @@ miner-cli scan -i 192.168.1.0/24 -i 10.0.0.0/24
 #### Query Multiple IP Ranges
 
 ```bash
+# New syntax (positional arguments)
+miner-cli summary 192.168.1.0/24 10.45.1.0/24 172.16.0.1-172.16.0.100 -o color -v
+
+# Legacy syntax (still supported)
 miner-cli summary \
   -i 192.168.1.0/24 \
   -i 10.45.1.0/24 \
@@ -171,7 +178,7 @@ miner-cli summary \
 #### JSON Output for Automation
 
 ```bash
-miner-cli stats -i 192.168.1.0/24 -o json | jq '.[] | select(.Error == null)'
+miner-cli stats 192.168.1.0/24 -o json | jq '.[] | select(.Error == null)'
 ```
 
 #### Fast Scanning with High Concurrency
