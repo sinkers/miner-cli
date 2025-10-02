@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "fmt"
+    "net/http"
     "os"
     "strconv"
     "strings"
@@ -226,21 +227,89 @@ func scanMiners(cmd *cobra.Command, args []string) error {
     // Use summary command to get more detailed info including hashrate
     results := cgClient.ExecuteCommand(ctx, ips, port, "summary", nil)
 
-    // Optionally enrich with chip temperature by querying device metrics
-    fetchTemps, _ := cmd.Flags().GetBool("scan-temps")
-    if fetchTemps {
-        // Build list of active IPs
-        activeIPs := make([]string, 0, len(results))
-        for _, r := range results {
-            if r.Error == "" {
-                activeIPs = append(activeIPs, r.IP)
+    // Detect firmware by querying Braiins API for active miners
+    for i := range results {
+        if results[i].Error == "" && results[i].Response != nil {
+            // Try to detect Braiins OS
+            if firmware := getBraaiinsFirmwareInfo(results[i].IP); firmware != "" {
+                // Add firmware info to the response map
+                switch resp := results[i].Response.(type) {
+                case map[string]interface{}:
+                    resp["firmware"] = firmware
+                default:
+                    // Convert to a generic map if needed
+                    b, err := json.Marshal(results[i].Response)
+                    if err == nil {
+                        var m map[string]interface{}
+                        if json.Unmarshal(b, &m) == nil {
+                            m["firmware"] = firmware
+                            results[i].Response = m
+                        }
+                    }
+                }
+            } else {
+                // Default to "Stock" if not Braiins
+                switch resp := results[i].Response.(type) {
+                case map[string]interface{}:
+                    resp["firmware"] = "Stock"
+                default:
+                    b, err := json.Marshal(results[i].Response)
+                    if err == nil {
+                        var m map[string]interface{}
+                        if json.Unmarshal(b, &m) == nil {
+                            m["firmware"] = "Stock"
+                            results[i].Response = m
+                        }
+                    }
+                }
             }
         }
-        if len(activeIPs) > 0 {
-            temps := make(map[string]float64)
+    }
 
+    // Enrich with chip temperature (always enabled now)
+    // Build list of active IPs with their firmware info
+    activeIPs := make([]string, 0, len(results))
+    firmwareMap := make(map[string]string)
+    for _, r := range results {
+        if r.Error == "" {
+            activeIPs = append(activeIPs, r.IP)
+            // Extract firmware info
+            if r.Response != nil {
+                if respMap, ok := r.Response.(map[string]interface{}); ok {
+                    if fw, ok := respMap["firmware"].(string); ok {
+                        firmwareMap[r.IP] = fw
+                    }
+                }
+            }
+        }
+    }
+    if len(activeIPs) > 0 {
+        temps := make(map[string]float64)
+
+        // Query Braiins API for miners running Braiins OS
+        braiiinsIPs := make([]string, 0)
+        otherIPs := make([]string, 0)
+        for _, ip := range activeIPs {
+            if fw, ok := firmwareMap[ip]; ok && strings.Contains(strings.ToLower(fw), "braiins") {
+                braiiinsIPs = append(braiiinsIPs, ip)
+            } else {
+                otherIPs = append(otherIPs, ip)
+            }
+        }
+
+        // Fetch temps from Braiins GraphQL API
+        if len(braiiinsIPs) > 0 {
+            for _, ip := range braiiinsIPs {
+                if t, ok := getBraiinsChipTemp(ip); ok {
+                    temps[ip] = t
+                }
+            }
+        }
+
+        // For non-Braiins miners, try devs/stats
+        if len(otherIPs) > 0 {
             // First attempt via `devs`
-            devResults := cgClient.ExecuteCommand(ctx, activeIPs, port, "devs", nil)
+            devResults := cgClient.ExecuteCommand(ctx, otherIPs, port, "devs", nil)
             for _, dr := range devResults {
                 if dr.Error != "" || dr.Response == nil {
                     continue
@@ -251,8 +320,8 @@ func scanMiners(cmd *cobra.Command, args []string) error {
             }
 
             // Fallback to `stats` for IPs with no temp yet
-            missing := make([]string, 0, len(activeIPs))
-            for _, ip := range activeIPs {
+            missing := make([]string, 0, len(otherIPs))
+            for _, ip := range otherIPs {
                 if _, ok := temps[ip]; !ok {
                     missing = append(missing, ip)
                 }
@@ -268,25 +337,25 @@ func scanMiners(cmd *cobra.Command, args []string) error {
                     }
                 }
             }
+        }
 
-            // Merge into main results by adding chip_temp_c into the Response map
-            for i := range results {
-                if t, ok := temps[results[i].IP]; ok {
-                    // Ensure Response is a map[string]interface{}
-                    switch resp := results[i].Response.(type) {
-                    case map[string]interface{}:
-                        resp["chip_temp_c"] = t
-                        results[i].Response = resp
-                    default:
-                        // Convert to a generic map if needed
-                        // Best-effort: try JSON round-trip
-                        b, err := json.Marshal(results[i].Response)
-                        if err == nil {
-                            var m map[string]interface{}
-                            if json.Unmarshal(b, &m) == nil {
-                                m["chip_temp_c"] = t
-                                results[i].Response = m
-                            }
+        // Merge into main results by adding chip_temp_c into the Response map
+        for i := range results {
+            if t, ok := temps[results[i].IP]; ok {
+                // Ensure Response is a map[string]interface{}
+                switch resp := results[i].Response.(type) {
+                case map[string]interface{}:
+                    resp["chip_temp_c"] = t
+                    results[i].Response = resp
+                default:
+                    // Convert to a generic map if needed
+                    // Best-effort: try JSON round-trip
+                    b, err := json.Marshal(results[i].Response)
+                    if err == nil {
+                        var m map[string]interface{}
+                        if json.Unmarshal(b, &m) == nil {
+                            m["chip_temp_c"] = t
+                            results[i].Response = m
                         }
                     }
                 }
@@ -410,6 +479,118 @@ func extractChipTempFromStats(resp interface{}) (float64, bool) {
     if maxT >= 0 {
         return maxT, true
     }
+    return 0, false
+}
+
+// getBraaiinsFirmwareInfo queries the Braiins OS GraphQL API to detect firmware version
+func getBraaiinsFirmwareInfo(ip string) string {
+    client := &http.Client{Timeout: 2 * time.Second}
+
+    query := `{"query":"{ bos { info { mode version { full isPlus } } } }"}`
+
+    resp, err := client.Post(
+        fmt.Sprintf("http://%s/graphql", ip),
+        "application/json",
+        strings.NewReader(query),
+    )
+    if err != nil {
+        return ""
+    }
+    defer resp.Body.Close()
+
+    var result struct {
+        Data struct {
+            Bos struct {
+                Info struct {
+                    Mode    string `json:"mode"`
+                    Version struct {
+                        Full   string `json:"full"`
+                        IsPlus bool   `json:"isPlus"`
+                    } `json:"version"`
+                } `json:"info"`
+            } `json:"bos"`
+        } `json:"data"`
+    }
+
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return ""
+    }
+
+    if result.Data.Bos.Info.Version.Full != "" {
+        version := result.Data.Bos.Info.Version.Full
+        // Simplify version string - extract just the version number
+        // Format: "2025-02-21-0-e05df053-25.01-plus" -> "Braiins OS+ 25.01"
+        parts := strings.Split(version, "-")
+        if len(parts) > 0 {
+            // Find the version number (e.g., "25.01")
+            for _, part := range parts {
+                if strings.Contains(part, ".") && len(part) <= 6 {
+                    suffix := ""
+                    if result.Data.Bos.Info.Version.IsPlus {
+                        suffix = "+"
+                    }
+                    return fmt.Sprintf("Braiins OS%s %s", suffix, part)
+                }
+            }
+        }
+        // Fallback to showing if it's Plus or not
+        if result.Data.Bos.Info.Version.IsPlus {
+            return "Braiins OS+"
+        }
+        return "Braiins OS"
+    }
+
+    return ""
+}
+
+// getBraiinsChipTemp queries the Braiins OS GraphQL API for chip temperature
+func getBraiinsChipTemp(ip string) (float64, bool) {
+    client := &http.Client{Timeout: 2 * time.Second}
+
+    query := `{"query":"{ bosminer { info { workSolver { temperatures { name degreesC } } } } }"}`
+
+    resp, err := client.Post(
+        fmt.Sprintf("http://%s/graphql", ip),
+        "application/json",
+        strings.NewReader(query),
+    )
+    if err != nil {
+        return 0, false
+    }
+    defer resp.Body.Close()
+
+    var result struct {
+        Data struct {
+            Bosminer struct {
+                Info struct {
+                    WorkSolver struct {
+                        Temperatures []struct {
+                            Name     string  `json:"name"`
+                            DegreesC float64 `json:"degreesC"`
+                        } `json:"temperatures"`
+                    } `json:"workSolver"`
+                } `json:"info"`
+            } `json:"bosminer"`
+        } `json:"data"`
+    }
+
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return 0, false
+    }
+
+    // Find the Chip temperature (handle both "chip" and "MAX_CHIP")
+    maxTemp := 0.0
+    for _, temp := range result.Data.Bosminer.Info.WorkSolver.Temperatures {
+        lowerName := strings.ToLower(temp.Name)
+        if (lowerName == "chip" || lowerName == "max_chip") && temp.DegreesC > maxTemp {
+            maxTemp = temp.DegreesC
+        }
+    }
+
+    if maxTemp > 0 {
+        return maxTemp, true
+    }
+
     return 0, false
 }
 

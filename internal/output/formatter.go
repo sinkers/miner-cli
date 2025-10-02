@@ -413,17 +413,18 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
     // Print header
-    fmt.Fprintln(w, "IP\tPort\tHashrate (GH/s)\tChip Temp (°C)\tAccepted\tRejected\tHW Errors\tUptime")
-    fmt.Fprintln(w, "---\t----\t--------------\t--------------\t--------\t--------\t---------\t------")
+    fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tChip Temp (°C)\tAccepted\tRejected\tHW Errors\tUptime")
+    fmt.Fprintln(w, "---\t--------\t--------------\t--------------\t--------\t--------\t---------\t------")
 
 	for _, result := range results {
 		// Skip failed results unless verbose
 		if result.Error != "" {
 			if f.Verbose {
-				fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					result.IP,
-					result.Port,
+					"-",
 					"offline",
+					"-",
 					"-",
 					"-",
 					"-",
@@ -434,6 +435,7 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 
 		// Extract summary data
+        firmware := "-"
         hashrate := "-"
         chipTemp := "-"
         accepted := "-"
@@ -445,6 +447,10 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		if jsonBytes, err := json.Marshal(result.Response); err == nil {
 			var respMap map[string]interface{}
 			if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+                // Get firmware info
+                if val, ok := respMap["firmware"]; ok {
+                    firmware = fmt.Sprintf("%v", val)
+                }
                 // Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
                 if val, ok := respMap["MHS 5s"]; ok {
                     mhs := toFloat64(val)
@@ -494,9 +500,9 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			}
 		}
 
-        fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+        fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
             result.IP,
-            result.Port,
+            firmware,
             hashrate,
             chipTemp,
             accepted,
