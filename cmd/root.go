@@ -297,11 +297,15 @@ func scanMiners(cmd *cobra.Command, args []string) error {
             }
         }
 
-        // Fetch temps from Braiins GraphQL API
+        // Fetch stats from Braiins GraphQL API
+        braiinsStats := make(map[string]BraiinsStats)
         if len(braiiinsIPs) > 0 {
             for _, ip := range braiiinsIPs {
-                if t, ok := getBraiinsChipTemp(ip); ok {
-                    temps[ip] = t
+                if stats, ok := getBraiinsStats(ip); ok {
+                    braiinsStats[ip] = stats
+                    if stats.ChipTemp > 0 {
+                        temps[ip] = stats.ChipTemp
+                    }
                 }
             }
         }
@@ -339,22 +343,46 @@ func scanMiners(cmd *cobra.Command, args []string) error {
             }
         }
 
-        // Merge into main results by adding chip_temp_c into the Response map
+        // Merge into main results by adding chip_temp_c, power, and tuning data into the Response map
         for i := range results {
+            // Add temperature data
             if t, ok := temps[results[i].IP]; ok {
-                // Ensure Response is a map[string]interface{}
                 switch resp := results[i].Response.(type) {
                 case map[string]interface{}:
                     resp["chip_temp_c"] = t
                     results[i].Response = resp
                 default:
-                    // Convert to a generic map if needed
-                    // Best-effort: try JSON round-trip
                     b, err := json.Marshal(results[i].Response)
                     if err == nil {
                         var m map[string]interface{}
                         if json.Unmarshal(b, &m) == nil {
                             m["chip_temp_c"] = t
+                            results[i].Response = m
+                        }
+                    }
+                }
+            }
+
+            // Add Braiins-specific stats (power and tuning)
+            if stats, ok := braiinsStats[results[i].IP]; ok {
+                switch resp := results[i].Response.(type) {
+                case map[string]interface{}:
+                    if stats.PowerW > 0 {
+                        resp["power_w"] = stats.PowerW
+                    }
+                    resp["tuning"] = stats.Tuning
+                    resp["tuner_status"] = stats.TunerStatus
+                    results[i].Response = resp
+                default:
+                    b, err := json.Marshal(results[i].Response)
+                    if err == nil {
+                        var m map[string]interface{}
+                        if json.Unmarshal(b, &m) == nil {
+                            if stats.PowerW > 0 {
+                                m["power_w"] = stats.PowerW
+                            }
+                            m["tuning"] = stats.Tuning
+                            m["tuner_status"] = stats.TunerStatus
                             results[i].Response = m
                         }
                     }
@@ -543,11 +571,19 @@ func getBraaiinsFirmwareInfo(ip string) string {
     return ""
 }
 
-// getBraiinsChipTemp queries the Braiins OS GraphQL API for chip temperature
-func getBraiinsChipTemp(ip string) (float64, bool) {
+// BraiinsStats holds mining statistics from Braiins OS
+type BraiinsStats struct {
+    ChipTemp  float64
+    PowerW    int
+    Tuning    bool
+    TunerStatus string
+}
+
+// getBraiinsStats queries the Braiins OS GraphQL API for chip temperature, power, and tuning status
+func getBraiinsStats(ip string) (BraiinsStats, bool) {
     client := &http.Client{Timeout: 2 * time.Second}
 
-    query := `{"query":"{ bosminer { info { workSolver { temperatures { name degreesC } } } } }"}`
+    query := `{"query":"{ bosminer { info { workSolver { temperatures { name degreesC } power { approxConsumptionW } tuner { status } } } } }"}`
 
     resp, err := client.Post(
         fmt.Sprintf("http://%s/graphql", ip),
@@ -555,7 +591,7 @@ func getBraiinsChipTemp(ip string) (float64, bool) {
         strings.NewReader(query),
     )
     if err != nil {
-        return 0, false
+        return BraiinsStats{}, false
     }
     defer resp.Body.Close()
 
@@ -568,6 +604,12 @@ func getBraiinsChipTemp(ip string) (float64, bool) {
                             Name     string  `json:"name"`
                             DegreesC float64 `json:"degreesC"`
                         } `json:"temperatures"`
+                        Power struct {
+                            ApproxConsumptionW int `json:"approxConsumptionW"`
+                        } `json:"power"`
+                        Tuner struct {
+                            Status string `json:"status"`
+                        } `json:"tuner"`
                     } `json:"workSolver"`
                 } `json:"info"`
             } `json:"bosminer"`
@@ -575,8 +617,10 @@ func getBraiinsChipTemp(ip string) (float64, bool) {
     }
 
     if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-        return 0, false
+        return BraiinsStats{}, false
     }
+
+    stats := BraiinsStats{}
 
     // Find the Chip temperature (handle both "chip" and "MAX_CHIP")
     maxTemp := 0.0
@@ -586,12 +630,17 @@ func getBraiinsChipTemp(ip string) (float64, bool) {
             maxTemp = temp.DegreesC
         }
     }
+    stats.ChipTemp = maxTemp
 
-    if maxTemp > 0 {
-        return maxTemp, true
-    }
+    // Get power consumption
+    stats.PowerW = result.Data.Bosminer.Info.WorkSolver.Power.ApproxConsumptionW
 
-    return 0, false
+    // Check tuning status
+    status := strings.ToUpper(result.Data.Bosminer.Info.WorkSolver.Tuner.Status)
+    stats.TunerStatus = status
+    stats.Tuning = (status == "TUNING" || status == "TESTING")
+
+    return stats, true
 }
 
 func parseIntParam(param string) (int, error) {

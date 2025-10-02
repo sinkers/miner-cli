@@ -413,17 +413,19 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
     // Print header
-    fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tChip Temp (°C)\tAccepted\tRejected\tHW Errors\tUptime")
-    fmt.Fprintln(w, "---\t--------\t--------------\t--------------\t--------\t--------\t---------\t------")
+    fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
+    fmt.Fprintln(w, "---\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
 
 	for _, result := range results {
 		// Skip failed results unless verbose
 		if result.Error != "" {
 			if f.Verbose {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					result.IP,
 					"-",
 					"offline",
+					"-",
+					"-",
 					"-",
 					"-",
 					"-",
@@ -437,7 +439,9 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		// Extract summary data
         firmware := "-"
         hashrate := "-"
+        powerKW := "-"
         chipTemp := "-"
+        tuning := "-"
         accepted := "-"
         rejected := "-"
         hwErrors := "-"
@@ -474,6 +478,24 @@ func (f *ScanFormatter) Format(results []client.Result) error {
                     }
                 }
 
+                // Power consumption (Braiins miners only)
+                if val, ok := respMap["power_w"]; ok {
+                    powerW := toFloat64(val)
+                    powerKW = fmt.Sprintf("%.2f", powerW/1000.0)
+                }
+
+                // Tuning status (Braiins miners only)
+                if val, ok := respMap["tuning"]; ok {
+                    if isTuning, ok := val.(bool); ok && isTuning {
+                        tuning = "Yes"
+                    } else {
+                        // Show tuner status if available
+                        if status, ok := respMap["tuner_status"].(string); ok && status != "" {
+                            tuning = status
+                        }
+                    }
+                }
+
                 if val, ok := respMap["Accepted"]; ok {
                     accepted = fmt.Sprintf("%v", val)
                 }
@@ -500,11 +522,13 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			}
 		}
 
-        fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+        fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
             result.IP,
             firmware,
             hashrate,
+            powerKW,
             chipTemp,
+            tuning,
             accepted,
             rejected,
             hwErrors,
