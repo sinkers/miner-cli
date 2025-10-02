@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -217,27 +216,17 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	cgClient := client.NewClient(time.Duration(timeout)*time.Second, workers)
-	results := cgClient.ExecuteCommand(ctx, ips, port, "version", nil)
-
-	activeMiners := []string{}
-	for _, result := range results {
-		if result.Error == "" {
-			activeMiners = append(activeMiners, fmt.Sprintf("%s:%d", result.IP, result.Port))
-		}
-	}
+	// Use summary command to get more detailed info including hashrate
+	results := cgClient.ExecuteCommand(ctx, ips, port, "summary", nil)
 
 	if outputFormat == "json" {
 		formatter := output.GetFormatter(outputFormat, verbose)
 		return formatter.Format(results)
 	}
 
-	fmt.Printf("\nActive Miners Found: %d\n", len(activeMiners))
-	fmt.Println(strings.Repeat("=", 40))
-	for _, miner := range activeMiners {
-		fmt.Println(miner)
-	}
-
-	return nil
+	// Use the new scan formatter for better output
+	formatter := output.GetFormatter("scan", verbose)
+	return formatter.Format(results)
 }
 
 func parseIntParam(param string) (int, error) {
