@@ -1,43 +1,65 @@
-# CGMiner API CLI
+# Miner CLI
 
-A comprehensive command-line tool for interacting with CGMiner API endpoints across multiple miners simultaneously. Supports IP ranges in CIDR notation and range format, with multiple output formats including colored terminal output and JSON.
+A comprehensive command-line tool for managing fleets of Bitcoin miners, PDUs, and managed switches. Supports multiple firmware types, IP ranges in CIDR notation, and provides real-time monitoring with multiple output formats.
 
-## Coming Soon
+## Overview
 
-### Extended Firmware Support
-In addition to the standard CGMiner API, support for custom firmware APIs is being developed:
+Miner CLI is a unified management interface designed for Bitcoin mining operations of any scale. It provides a single tool to:
 
-- **Vnish Firmware**: Full support for Vnish-specific APIs including advanced tuning, performance profiles, and extended monitoring capabilities. Implementation complete, integration pending.
-  
-- **Braiins OS+**: Comprehensive gRPC-based API support for Braiins OS+ miners including power management, performance tuning, hashboard control, and system operations. Implementation complete, integration pending.
-
-These implementations are currently available as standalone libraries in the codebase and will be integrated into the main CLI in a future release.
+- **Manage Bitcoin Miners**: Support for CGMiner API, Braiins OS, Vnish firmware, and more
+- **Monitor Performance**: Real-time hashrate, temperature, power consumption, and tuning status
+- **Control Infrastructure**: PDU power management and network switch configuration (coming soon)
+- **Fleet Operations**: Execute commands across hundreds of devices simultaneously
 
 ## Features
 
-- **Multiple IP Format Support**:
-  - CIDR notation (e.g., `192.168.1.0/24`, `10.0.0.0/20`)
-  - IP ranges (e.g., `10.45.1.0-10.45.20.254`)
-  - Single IPs (e.g., `192.168.1.100`)
-  - Multiple ranges in a single command
+### Multi-Firmware Support
 
-- **Comprehensive CGMiner API Coverage**:
-  - All read commands (summary, devs, pools, stats, version, config, etc.)
-  - Pool management (add, remove, enable, disable, switch)
-  - Miner control (restart, quit)
-  - Statistics management (zero stats)
-  - Custom command support for any API endpoint
+- **CGMiner API**: Full support for standard CGMiner-compatible miners
+- **Braiins OS/OS+**: Native integration with Braiins GraphQL API for advanced monitoring
+  - Firmware version detection
+  - Real-time power consumption (kW)
+  - Chip temperature monitoring
+  - Autotuner status tracking
+- **Vnish Firmware**: Advanced tuning and performance profiles (library available, integration pending)
+- **Stock Firmware**: Fallback support for standard miners
 
-- **Output Formats**:
-  - **Color**: Beautiful colored terminal output with status indicators
-  - **JSON**: Machine-readable JSON output (with pretty-print option)
-  - **Table**: Structured table format for easy reading
+### Intelligent Scanning
 
-- **Performance Features**:
-  - Concurrent execution with configurable worker count
-  - Configurable timeouts
-  - Efficient IP range parsing
-  - Bulk operations support
+The `scan` command provides comprehensive fleet visibility:
+
+```bash
+miner-cli scan 10.45.9.0/24
+```
+
+**Output includes:**
+- IP address and firmware version (e.g., Braiins OS+ 25.01, Braiins OS+ 25.07)
+- Real-time hashrate (GH/s)
+- Power consumption (kW) - for Braiins OS miners
+- Chip temperature (°C)
+- Autotuner status (STABLE, TUNING, TESTING)
+- Share statistics (Accepted, Rejected, HW Errors)
+- Uptime
+
+### IP Range Support
+
+- **CIDR notation**: `192.168.1.0/24`, `10.0.0.0/20`
+- **IP ranges**: `10.45.1.0-10.45.20.254`
+- **Single IPs**: `192.168.1.100`
+- **Multiple ranges**: Combine any format in a single command
+
+### Output Formats
+
+- **Color**: Beautiful colored terminal output with status indicators
+- **JSON**: Machine-readable output for automation and scripting
+- **Table**: Structured format for easy reading
+
+### Performance Features
+
+- Concurrent execution with configurable worker pools (default: 255 workers)
+- Automatic firmware detection via API probing
+- Configurable timeouts for fast scanning
+- Efficient bulk operations
 
 ## Installation
 
@@ -53,51 +75,70 @@ Or install directly:
 go install github.com/sinkers/miner-cli@latest
 ```
 
-## Usage
-
-### Basic Command Structure
+Or use the Makefile:
 
 ```bash
-miner-cli <command> -i <ip-range> [options]
+make install        # Install to $GOPATH/bin
+make build          # Build binary only
+make cross-compile  # Build for multiple platforms
 ```
 
-### Global Options
+## Quick Start
 
-- `-i, --ips`: IP ranges (can be specified multiple times)
-- `-p, --port`: CGMiner API port (default: 4028)
-- `-t, --timeout`: Connection timeout in seconds (default: 5)
-- `-w, --workers`: Number of concurrent workers (default: 10)
-- `-o, --output`: Output format: color, json, table (default: color)
-- `-v, --verbose`: Verbose output
-
-### Commands
-
-#### Information Commands
+### Scan Your Fleet
 
 ```bash
-# Get mining summary (new syntax)
-miner-cli summary 192.168.1.0/24
+# Scan a subnet and show all miner details
+miner-cli scan 192.168.1.0/24
 
-# Get device information
-miner-cli devs 10.0.0.1-10.0.0.50
+# Scan with verbose output
+miner-cli scan 10.0.0.0/20 -v
 
-# Get pool information (multiple ranges)
-miner-cli pools 192.168.1.100 192.168.1.101
-
-# Get detailed statistics with JSON output
-miner-cli stats 192.168.1.0/28 -o json
-
-# Get miner version
-miner-cli version 10.45.0.0/20
-
-# Get configuration with verbose output
-miner-cli config 192.168.1.0/24 -v
-
-# Legacy syntax with -i flag (still supported)
-miner-cli summary -i 192.168.1.0/24
+# JSON output for automation
+miner-cli scan 192.168.1.0/24 -o json
 ```
 
-#### Pool Management
+### Get Mining Summary
+
+```bash
+# Summary for specific miners
+miner-cli summary 192.168.1.100 192.168.1.101
+
+# Summary for subnet with JSON output
+miner-cli summary 192.168.1.0/24 -o json
+
+# Multiple ranges
+miner-cli summary 192.168.1.0/24 10.45.0.0/24
+```
+
+### Monitor Devices
+
+```bash
+# Get device/hashboard information
+miner-cli devs 192.168.1.0/24
+
+# Get detailed statistics
+miner-cli stats 10.0.0.1-10.0.0.50 -o json
+
+# Check pool status
+miner-cli pools 192.168.1.0/24
+```
+
+## Command Reference
+
+### Information Commands
+
+| Command | Description |
+|---------|-------------|
+| `scan` | Scan network for miners with comprehensive status |
+| `summary` | Get mining summary statistics |
+| `devs` | Get device/hashboard information |
+| `pools` | Get pool configuration and status |
+| `stats` | Get detailed mining statistics |
+| `version` | Get miner firmware version |
+| `config` | Get miner configuration |
+
+### Pool Management
 
 ```bash
 # Add a new pool
@@ -109,185 +150,131 @@ miner-cli addpool 192.168.1.0/24 \
 # Switch to pool ID 1
 miner-cli switchpool 192.168.1.0/24 --pool 1
 
-# Enable pool ID 2
+# Enable/disable pools
 miner-cli enablepool 192.168.1.0/24 --pool 2
-
-# Disable pool ID 0
 miner-cli disablepool 192.168.1.0/24 --pool 0
 
-# Remove pool ID 3
+# Remove a pool
 miner-cli removepool 192.168.1.0/24 --pool 3
 ```
 
-#### Miner Control
+### Miner Control
 
 ```bash
 # Restart miners
-miner-cli restart -i 192.168.1.0/24
+miner-cli restart 192.168.1.0/24
 
 # Stop miners (use with caution!)
-miner-cli quit -i 192.168.1.100
+miner-cli quit 192.168.1.100
+
+# Zero statistics
+miner-cli zero 192.168.1.0/24 --which all --all
 ```
 
-#### Statistics Management
-
-```bash
-# Zero all statistics
-miner-cli zero -i 192.168.1.0/24 --which all --all
-
-# Zero specific statistics
-miner-cli zero -i 192.168.1.0/24 --which bestshare
-```
-
-#### Custom Commands
+### Custom Commands
 
 ```bash
 # Execute any CGMiner API command
-miner-cli custom -i 192.168.1.100 --cmd "asccount"
+miner-cli custom 192.168.1.100 --cmd "asccount"
 
-# Custom command with arguments
-miner-cli custom -i 192.168.1.100 --cmd "asc" --args '{"parameter": "0"}'
-```
-
-#### Utility Commands
-
-```bash
 # List all available commands
 miner-cli list
-
-# Scan IP ranges for active miners
-miner-cli scan 192.168.1.0/24 10.0.0.0/24
 ```
 
-### Examples
+## Global Options
 
-#### Query Multiple IP Ranges
+- `-i, --ips`: IP ranges (can be specified multiple times)
+- `-p, --port`: API port (default: 4028)
+- `-t, --timeout`: Connection timeout in seconds (default: 5)
+- `-w, --workers`: Number of concurrent workers (default: 255)
+- `-o, --output`: Output format: color, json, table (default: color)
+- `-v, --verbose`: Verbose output
+
+## Example: Fleet Monitoring
+
+Monitor a large mining fleet across multiple subnets:
 
 ```bash
-# New syntax (positional arguments)
-miner-cli summary 192.168.1.0/24 10.45.1.0/24 172.16.0.1-172.16.0.100 -o color -v
+# Scan entire facility
+miner-cli scan 10.45.0.0/16 -w 500 -t 2
 
-# Legacy syntax (still supported)
-miner-cli summary \
-  -i 192.168.1.0/24 \
-  -i 10.45.1.0/24 \
-  -i 172.16.0.1-172.16.0.100 \
-  -o color -v
+# Get performance summary with JSON output for analysis
+miner-cli summary 10.45.0.0/16 -o json | jq '.[] | select(.Error == null)'
+
+# Monitor specific temperature ranges
+miner-cli scan 192.168.1.0/24 -o json | \
+  jq '.[] | select(.response.chip_temp_c > 75)'
 ```
 
-#### JSON Output for Automation
+## Example: Automated Pool Switching
 
 ```bash
-miner-cli stats 192.168.1.0/24 -o json | jq '.[] | select(.Error == null)'
+# Switch all miners to failover pool
+miner-cli switchpool 10.45.0.0/20 --pool 1 -w 100
+
+# Verify pool configuration
+miner-cli pools 10.45.0.0/20 -o json | \
+  jq '.[] | {ip: .ip, active_pool: .response.POOLS[0].URL}'
 ```
 
-#### Fast Scanning with High Concurrency
+## Scan Output Example
 
-```bash
-miner-cli scan -i 10.0.0.0/20 -w 50 -t 2
+```
+Scanning 255 hosts for active miners...
+
+Active Miners Found: 23 out of 255 scanned
+================================================================================
+IP          Firmware           Hashrate (GH/s)  Power (kW)  Temp (°C)  Tuning  Accepted  Rejected  HW Errors  Uptime
+---         --------           --------------   ----------  ---------  ------  --------  --------  ---------  ------
+10.45.9.1   Braiins OS+ 25.01  110776.91        3.28        62.0       STABLE  880       3         0          4h 41m
+10.45.9.2   Braiins OS+ 25.01  111639.79        3.29        62.5       STABLE  1600      8         0          4h 41m
+10.45.9.3   Braiins OS+ 25.07  102588.56        3.06        62.0       STABLE  1456      6         0          4h 41m
+...
+================================================================================
 ```
 
-#### Batch Pool Configuration
+## Performance Tuning
+
+### Fast Scanning
 
 ```bash
-# Add backup pools to all miners
+# High concurrency for large networks
+miner-cli scan 10.0.0.0/16 -w 500 -t 2
+
+# Reduce timeout for fast detection
+miner-cli scan 192.168.1.0/24 -t 1
+```
+
+### Batch Operations
+
+```bash
+# Parallel pool updates
 for pool in pool1.example.com pool2.example.com pool3.example.com; do
-  miner-cli addpool -i 192.168.1.0/24 \
+  miner-cli addpool 192.168.1.0/24 \
     --url "stratum+tcp://${pool}:3333" \
     --user myworker \
     --pass x
 done
 ```
 
-## Output Format Examples
+## Architecture
 
-### Color Output (Default)
+### Unified API Abstraction (In Development)
 
-```
-=== CGMiner API Results ===
-Total: 5 | Success: 4 | Failed: 1
+The project includes a unified API abstraction layer for seamless integration across different miner types:
 
-✓ 192.168.1.100:4028 [summary]
-  Duration: 125ms
-  Elapsed: 3600
-  MHS av: 13500.45
-  Found Blocks: 2
-  Hardware Errors: 15
-  Utility: 4.35
+- **CGMiner Adapter**: Standard CGMiner API support
+- **Braiins Adapter**: gRPC-based Braiins OS integration
+- **Vnish Adapter**: Vnish firmware API support
 
-✗ 192.168.1.101:4028 [summary]
-  Error: connection timeout
-  Duration: 5s
+See `docs/unified-api-abstraction-*.md` for implementation details.
 
-=== Summary ===
-Command executed on 5 hosts
-Success: 4 hosts responded successfully
-Failed: 1 hosts failed
-```
+### Current Implementation
 
-### JSON Output
-
-```json
-[
-  {
-    "ip": "192.168.1.100",
-    "port": 4028,
-    "command": "summary",
-    "response": {
-      "Elapsed": 3600,
-      "MHS av": 13500.45,
-      "Found Blocks": 2,
-      "Hardware Errors": 15,
-      "Utility": 4.35
-    },
-    "duration": "125ms"
-  },
-  {
-    "ip": "192.168.1.101",
-    "port": 4028,
-    "command": "summary",
-    "error": "connection timeout",
-    "duration": "5s"
-  }
-]
-```
-
-### Table Output
-
-```
-IP              Port    Command    Status    Duration    Details
----             ----    -------    ------    --------    -------
-192.168.1.100   4028    summary    Success   125ms       {"Elapsed":3600,"MHS av":13500.45...}
-192.168.1.101   4028    summary    Failed    5s          connection timeout
-
-Summary: Total=2, Success=1, Failed=1
-```
-
-## Performance Considerations
-
-- **Workers**: Increase `-w` for faster execution on large IP ranges
-- **Timeout**: Reduce `-t` for faster scanning when expecting many offline hosts
-- **IP Ranges**: Use CIDR notation for continuous ranges for better performance
-- **Output Format**: JSON output is fastest for large result sets
-
-## Error Handling
-
-The tool handles various error conditions gracefully:
-
-- Connection timeouts
-- Invalid API responses
-- Network errors
-- Invalid IP ranges
-- Missing required parameters
-
-Failed connections are reported but don't stop execution for other hosts.
-
-## Security Notes
-
-- This tool requires network access to CGMiner API ports (default 4028)
-- Ensure CGMiner API access is properly secured in production environments
-- Some commands (like `quit`) can stop miners - use with caution
-- Consider firewall rules when scanning large IP ranges
+- **Direct API Integration**: The scan command uses direct GraphQL/HTTP APIs for optimal performance
+- **Worker Pool Architecture**: Configurable concurrency for handling large fleets
+- **Automatic Firmware Detection**: Queries Braiins GraphQL API to detect firmware type
+- **Fallback Support**: Standard CGMiner API fallback for non-Braiins miners
 
 ## Development
 
@@ -296,44 +283,97 @@ Failed connections are reported but don't stop execution for other hosts.
 ```bash
 git clone https://github.com/sinkers/miner-cli
 cd miner-cli
-go mod download
-go build -o miner-cli
+make build
 ```
 
 ### Running Tests
 
 ```bash
-go test ./...
+make test              # Run tests
+make test-coverage     # Generate coverage report
+make test-verbose      # Detailed test output
 ```
 
-### Adding New Commands
+### Development Tools
 
-1. Add the command to `GetAvailableCommands()` in `internal/client/cgminer.go`
-2. Add command description to `GetCommandDescription()`
-3. Implement the command logic in `executeJob()`
-4. Add any required flags in `cmd/root.go`
+```bash
+make dev-setup    # Install development tools
+make fmt          # Format code
+make lint         # Run linter
+make check        # Run all checks
+```
+
+### CI/CD
+
+The project uses GitHub Actions for:
+- Automated testing with race detection
+- Cross-platform builds (Linux, macOS, Windows)
+- Security scanning with Gosec and govulncheck
+- Code coverage reporting
+
+## Roadmap
+
+### Upcoming Features
+
+- **PDU Management**: Power distribution unit control and monitoring
+- **Switch Management**: Network switch configuration and VLAN management
+- **Advanced Analytics**: Historical performance tracking and alerting
+- **Web Dashboard**: Real-time fleet visualization
+- **Firmware Management**: Automated firmware updates and rollback
+
+## Security Considerations
+
+- This tool requires network access to miner API ports (default 4028)
+- Braiins GraphQL API access (port 80/443) for advanced features
+- Ensure API access is properly secured in production
+- Some commands (like `quit`) can stop miners - use with caution
+- Consider firewall rules and network segmentation for large deployments
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Connection Refused**: Ensure CGMiner API is enabled and accessible
-2. **Timeout Errors**: Increase timeout with `-t` flag
-3. **Permission Denied**: Some commands require API write access
-4. **Invalid IP Range**: Check CIDR notation or range format
+**Connection Issues:**
+- Ensure CGMiner API is enabled (`--api-listen` in cgminer config)
+- Check firewall rules allow access to port 4028
+- For Braiins: Verify HTTP/GraphQL access on port 80
+
+**Timeout Errors:**
+- Increase timeout: `-t 10`
+- Reduce worker count if network is saturated: `-w 50`
+
+**Missing Temperature Data:**
+- Braiins OS miners: Temperature fetched from GraphQL API automatically
+- Stock firmware: Use `--scan-temps` flag (deprecated, now automatic)
 
 ### Debug Mode
 
-Use verbose mode for detailed output:
-
 ```bash
-miner-cli summary -i 192.168.1.100 -v
+miner-cli scan 192.168.1.0/24 -v
 ```
+
+## Contributing
+
+Pull requests are welcome! For major changes, please open an issue first.
+
+### Development Guidelines
+
+1. Follow existing code style (use `make fmt`)
+2. Add tests for new features
+3. Update documentation
+4. Ensure CI passes
 
 ## License
 
 MIT License - See LICENSE file for details
 
-## Contributing
+## Support
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+- GitHub Issues: https://github.com/sinkers/miner-cli/issues
+- Documentation: `docs/` directory in repository
+
+## Acknowledgments
+
+- CGMiner API by Con Kolivas
+- Braiins OS by Braiins Systems
+- Vnish firmware team
