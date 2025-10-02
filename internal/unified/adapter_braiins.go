@@ -30,8 +30,8 @@ func (a *BraiinsAdapter) Connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to Braiins: %w", err)
 	}
-	
-	a.host = details.Hostname
+
+	a.host = details.GetHostname()
 	a.connected = true
 	return nil
 }
@@ -81,78 +81,81 @@ func (a *BraiinsAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 		return nil, fmt.Errorf("failed to get hashboards: %w", err)
 	}
 
-	pools, err := a.client.GetPools()
+	poolGroups, err := a.client.GetPoolGroups()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pools: %w", err)
 	}
 
-	cooling, _ := a.client.GetCooling() // Optional, might fail
+	cooling, _ := a.client.GetCoolingState() // Optional, might fail
 
 	// Build unified summary
 	unified := &UnifiedSummary{
 		IPAddress:    a.host,
 		APIType:      APITypeBraiins,
-		Model:        details.Model,
+		Model:        details.GetHardwareIdentifier(),
 		Firmware:     "Braiins OS+",
-		Version:      details.BosVersion,
+		Version:      details.GetBosVersion().GetCurrent(),
 		Timestamp:    time.Now(),
 		ResponseTime: time.Since(start),
 	}
 
-	// Mining status
-	switch details.Status {
-	case "Mining":
+	// Mining status - details.Status is a MinerStatus enum, not a string
+	switch details.GetMinerStatus() {
+	case 1: // MINER_STATUS_MINING
 		unified.Status = StatusRunning
-	case "Paused":
+	case 2: // MINER_STATUS_PAUSED
 		unified.Status = StatusPaused
-	case "Stopped":
+	case 3: // MINER_STATUS_STOPPED
 		unified.Status = StatusStopped
-	case "Tuning":
+	case 4: // MINER_STATUS_TUNING
 		unified.Status = StatusTuning
 	default:
 		unified.Status = StatusUnknown
 	}
-	unified.StatusDetail = details.Status
+	unified.StatusDetail = details.GetMinerStatus().String()
 
 	// Performance metrics
-	unified.HashRate = stats.HashRate15m
+	unified.HashRate = stats.GetHashrate_15M().GetTerahashPerSecond()
 	unified.HashRateUnit = "TH/s"
-	unified.HashRate5s = stats.HashRate5s
-	unified.HashRate1m = stats.HashRate1m
-	unified.HashRate5m = stats.HashRate5m
-	unified.HashRate15m = stats.HashRate15m
+	unified.HashRate5s = stats.GetHashrate_5S().GetTerahashPerSecond()
+	unified.HashRate1m = stats.GetHashrate_1M().GetTerahashPerSecond()
+	unified.HashRate5m = stats.GetHashrate_5M().GetTerahashPerSecond()
+	unified.HashRate15m = stats.GetHashrate_15M().GetTerahashPerSecond()
 
 	// Power and efficiency
-	unified.PowerUsage = stats.PowerUsage
-	unified.Efficiency = stats.Efficiency
+	unified.PowerUsage = float64(stats.GetPowerConsumption().GetWatt())
+	unified.Efficiency = stats.GetEfficiency().GetJoulePerTerahash()
 
 	// Hardware health
-	unified.BoardsTotal = len(hashboards)
+	hashboardsList := hashboards.GetHashboards()
+	unified.BoardsTotal = len(hashboardsList)
 	unified.BoardsActive = 0
 	unified.ChipsTotal = 0
 	unified.ChipsActive = 0
-	
+
 	totalTemp := 0.0
 	tempCount := 0
 	unified.TempMax = 0.0
 	unified.TempMin = 999.0
 
-	for _, board := range hashboards {
-		if board.Active {
+	for _, board := range hashboardsList {
+		// Check if board is active (no critical errors)
+		if board.GetStatus() == 0 { // Assuming 0 is OK/Active
 			unified.BoardsActive++
 		}
-		unified.ChipsTotal += board.Chips
-		unified.ChipsActive += board.ChipsOK
-		
+		unified.ChipsTotal += int(board.GetChipsTotal())
+		unified.ChipsActive += int(board.GetChipsOk())
+
 		// Temperature tracking
-		if board.Temperature > 0 {
-			totalTemp += board.Temperature
+		temp := board.GetTemperature().GetCelsius()
+		if temp > 0 {
+			totalTemp += temp
 			tempCount++
-			if board.Temperature > unified.TempMax {
-				unified.TempMax = board.Temperature
+			if temp > unified.TempMax {
+				unified.TempMax = temp
 			}
-			if board.Temperature < unified.TempMin {
-				unified.TempMin = board.Temperature
+			if temp < unified.TempMin {
+				unified.TempMin = temp
 			}
 		}
 	}
@@ -164,38 +167,47 @@ func (a *BraiinsAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 
 	// Fans
 	if cooling != nil {
-		unified.FanCount = len(cooling.Fans)
+		fans := cooling.GetFans()
+		unified.FanCount = len(fans)
 		if unified.FanCount > 0 {
 			total := 0
-			for _, fan := range cooling.Fans {
-				total += fan.Speed
+			for _, fan := range fans {
+				total += int(fan.GetSpeed())
 			}
 			unified.FanSpeedAvg = total / unified.FanCount
 		}
 	}
 
 	// Work statistics
-	unified.Accepted = stats.SharesAccepted
-	unified.Rejected = stats.SharesRejected
+	unified.Accepted = int(stats.GetSharesAccepted())
+	unified.Rejected = int(stats.GetSharesRejected())
 	unified.HWErrors = 0 // Would need to aggregate from boards
 
-	// Pool information
-	unified.PoolCount = len(pools)
-	for _, pool := range pools {
-		if pool.Active {
-			unified.ActivePool = pool.URL
-			break
+	// Pool information - poolGroups contains multiple pool groups
+	unified.PoolCount = 0
+	if poolGroups != nil && len(poolGroups.GetPoolGroups()) > 0 {
+		for _, group := range poolGroups.GetPoolGroups() {
+			unified.PoolCount += len(group.GetPools())
+			// Get first active pool
+			if unified.ActivePool == "" {
+				for _, pool := range group.GetPools() {
+					if pool.GetEnabled() {
+						unified.ActivePool = pool.GetUrl()
+						break
+					}
+				}
+			}
 		}
 	}
 
 	// Uptime
-	unified.Uptime = time.Duration(details.Uptime) * time.Second
+	unified.Uptime = time.Duration(details.GetUptimeS()) * time.Second
 
 	// Errors and warnings
-	for _, board := range hashboards {
-		if board.Status != "OK" {
-			unified.Errors = append(unified.Errors, 
-				fmt.Sprintf("Board %d: %s", board.Index, board.Status))
+	for i, board := range hashboardsList {
+		if board.GetStatus() != 0 { // Assuming 0 is OK
+			unified.Errors = append(unified.Errors,
+				fmt.Sprintf("Board %d: status %d", i, board.GetStatus()))
 		}
 	}
 
@@ -218,27 +230,28 @@ func (a *BraiinsAdapter) GetDevices(ctx context.Context) ([]Device, error) {
 		}
 	}
 
-	hashboards, err := a.client.GetHashboards()
+	hashboardsResp, err := a.client.GetHashboards()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get hashboards: %w", err)
 	}
 
+	hashboards := hashboardsResp.GetHashboards()
 	devices := make([]Device, 0, len(hashboards))
-	for _, board := range hashboards {
+	for i, board := range hashboards {
 		status := "Alive"
-		if !board.Active {
+		if board.GetStatus() != 0 { // Assuming 0 is OK/Active
 			status = "Dead"
 		}
 
 		devices = append(devices, Device{
-			Index:       board.Index,
-			Name:        fmt.Sprintf("Board %d", board.Index),
+			Index:       i,
+			Name:        fmt.Sprintf("Board %d", i),
 			Status:      status,
-			Temperature: board.Temperature,
-			HashRate:    board.HashRate,
-			Chips:       board.Chips,
-			ChipsActive: board.ChipsOK,
-			Frequency:   board.Frequency,
+			Temperature: board.GetTemperature().GetCelsius(),
+			HashRate:    board.GetHashrate().GetTerahashPerSecond(),
+			Chips:       int(board.GetChipsTotal()),
+			ChipsActive: int(board.GetChipsOk()),
+			Frequency:   int(board.GetFrequency()),
 		})
 	}
 
@@ -253,27 +266,31 @@ func (a *BraiinsAdapter) GetPools(ctx context.Context) ([]Pool, error) {
 		}
 	}
 
-	braiinsPools, err := a.client.GetPools()
+	poolGroups, err := a.client.GetPoolGroups()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pools: %w", err)
 	}
 
-	pools := make([]Pool, 0, len(braiinsPools))
-	for i, p := range braiinsPools {
-		status := "Dead"
-		if p.Active {
-			status = "Alive"
-		}
+	pools := make([]Pool, 0)
+	poolID := 0
+	for _, group := range poolGroups.GetPoolGroups() {
+		for _, p := range group.GetPools() {
+			status := "Dead"
+			if p.GetEnabled() {
+				status = "Alive"
+			}
 
-		pools = append(pools, Pool{
-			ID:       i,
-			URL:      p.URL,
-			User:     p.User,
-			Status:   status,
-			Priority: i, // Braiins uses order as priority
-			Accepted: p.Accepted,
-			Rejected: p.Rejected,
-		})
+			pools = append(pools, Pool{
+				ID:       poolID,
+				URL:      p.GetUrl(),
+				User:     p.GetUser(),
+				Status:   status,
+				Priority: poolID,
+				Accepted: 0, // Not available in this response
+				Rejected: 0, // Not available in this response
+			})
+			poolID++
+		}
 	}
 
 	return pools, nil
@@ -290,7 +307,7 @@ func (a *BraiinsAdapter) StopMining(ctx context.Context) error {
 }
 
 func (a *BraiinsAdapter) RestartMining(ctx context.Context) error {
-	return a.client.RestartMining()
+	return a.client.Restart()
 }
 
 func (a *BraiinsAdapter) PauseMining(ctx context.Context) error {
@@ -321,7 +338,7 @@ func (a *BraiinsAdapter) RemovePool(ctx context.Context, poolID int) error {
 // System operations
 
 func (a *BraiinsAdapter) Reboot(ctx context.Context) error {
-	return a.client.RebootSystem()
+	return a.client.Reboot()
 }
 
 func (a *BraiinsAdapter) GetLogs(ctx context.Context, lines int) ([]string, error) {
@@ -332,19 +349,26 @@ func (a *BraiinsAdapter) GetLogs(ctx context.Context, lines int) ([]string, erro
 // Configuration
 
 func (a *BraiinsAdapter) GetConfig(ctx context.Context) (map[string]interface{}, error) {
-	config, err := a.client.GetCurrentTunerConfig()
+	tunerState, err := a.client.GetTunerState()
+	if err != nil {
+		return nil, err
+	}
+
+	minerConfig, err := a.client.GetMinerConfiguration()
 	if err != nil {
 		return nil, err
 	}
 
 	// Convert to generic map
 	return map[string]interface{}{
-		"tuner": config,
+		"tuner": tunerState,
+		"miner": minerConfig,
 	}, nil
 }
 
 func (a *BraiinsAdapter) SetPowerTarget(ctx context.Context, watts int) error {
-	return a.client.SetPowerTarget(float64(watts))
+	_, err := a.client.SetPowerTarget(uint64(watts))
+	return err
 }
 
 func (a *BraiinsAdapter) SetFanSpeed(ctx context.Context, percent int) error {
