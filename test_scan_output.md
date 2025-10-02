@@ -14,6 +14,7 @@ The new scan output includes these columns:
 - **IP**: Miner IP address
 - **Port**: CGMiner API port (default 4028)
 - **Hashrate (GH/s)**: Current hashrate converted from MH/s to GH/s
+- **Chip Temp (°C)**: Representative chip temperature; best-effort from summary, or from device metrics when using `--scan-temps`
 - **Accepted**: Number of accepted shares
 - **Rejected**: Number of rejected shares
 - **HW Errors**: Hardware error count
@@ -30,11 +31,11 @@ The formatter extracts hashrate from these fields (in order of preference):
 ```
 Active Miners Found: 3 out of 255 scanned
 ================================================================================
-IP              Port  Hashrate (GH/s)  Accepted  Rejected  HW Errors  Uptime
----             ----  --------------  --------  --------  ---------  ------
-10.45.1.100     4028  13.45           125843    234       12         5d 3h
-10.45.1.101     4028  14.23           134521    189       8          5d 3h
-10.45.1.102     4028  12.89           118932    312       15         4d 22h
+IP              Port  Hashrate (GH/s)  Chip Temp (°C)  Accepted  Rejected  HW Errors  Uptime
+---             ----  --------------   --------------  --------  --------  ---------  ------
+10.45.1.100     4028  13.45            76.5            125843    234       12         5d 3h
+10.45.1.101     4028  14.23            74.8            134521    189       8          5d 3h
+10.45.1.102     4028  12.89            79.1            118932    312       15         4d 22h
 ================================================================================
 ```
 
@@ -44,6 +45,9 @@ To test the scan command on the 10.45.1.0/24 network, run this from a machine th
 ```bash
 # Basic scan
 ./miner-cli scan 10.45.1.0/24
+
+# Include chip temperatures (slower)
+./miner-cli scan 10.45.1.0/24 --scan-temps
 
 # With custom timeout and workers
 ./miner-cli scan 10.45.1.0/24 -t 5 -w 100

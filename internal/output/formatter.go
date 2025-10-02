@@ -385,7 +385,7 @@ func toFloat64(v interface{}) float64 {
 
 // ScanFormatter displays scan results with miner details including hashrate
 type ScanFormatter struct {
-	Verbose bool
+    Verbose bool
 }
 
 func (f *ScanFormatter) Format(results []client.Result) error {
@@ -412,9 +412,9 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	// Create tabwriter
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
-	// Print header
-	fmt.Fprintln(w, "IP\tPort\tHashrate (GH/s)\tAccepted\tRejected\tHW Errors\tUptime")
-	fmt.Fprintln(w, "---\t----\t--------------\t--------\t--------\t---------\t------")
+    // Print header
+    fmt.Fprintln(w, "IP\tPort\tHashrate (GH/s)\tChip Temp (°C)\tAccepted\tRejected\tHW Errors\tUptime")
+    fmt.Fprintln(w, "---\t----\t--------------\t--------------\t--------\t--------\t---------\t------")
 
 	for _, result := range results {
 		// Skip failed results unless verbose
@@ -434,33 +434,43 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 
 		// Extract summary data
-		hashrate := "-"
-		accepted := "-"
-		rejected := "-"
-		hwErrors := "-"
-		uptime := "-"
+        hashrate := "-"
+        chipTemp := "-"
+        accepted := "-"
+        rejected := "-"
+        hwErrors := "-"
+        uptime := "-"
 
 		// Convert response to map for easy access
 		if jsonBytes, err := json.Marshal(result.Response); err == nil {
 			var respMap map[string]interface{}
 			if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
-				// Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
-				if val, ok := respMap["MHS 5s"]; ok {
-					mhs := toFloat64(val)
-					hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
-				} else if val, ok := respMap["MHS av"]; ok {
-					mhs := toFloat64(val)
-					hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
-				} else if val, ok := respMap["GHS 5s"]; ok {
-					// Some miners report in GH/s directly
-					hashrate = fmt.Sprintf("%.2f", toFloat64(val))
-				} else if val, ok := respMap["GHS av"]; ok {
-					hashrate = fmt.Sprintf("%.2f", toFloat64(val))
-				}
+                // Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
+                if val, ok := respMap["MHS 5s"]; ok {
+                    mhs := toFloat64(val)
+                    hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
+                } else if val, ok := respMap["MHS av"]; ok {
+                    mhs := toFloat64(val)
+                    hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
+                } else if val, ok := respMap["GHS 5s"]; ok {
+                    // Some miners report in GH/s directly
+                    hashrate = fmt.Sprintf("%.2f", toFloat64(val))
+                } else if val, ok := respMap["GHS av"]; ok {
+                    hashrate = fmt.Sprintf("%.2f", toFloat64(val))
+                }
 
-				if val, ok := respMap["Accepted"]; ok {
-					accepted = fmt.Sprintf("%v", val)
-				}
+                // Chip temperature (prefer explicitly attached value)
+                if val, ok := respMap["chip_temp_c"]; ok {
+                    chipTemp = fmt.Sprintf("%.1f", toFloat64(val))
+                } else {
+                    if t, ok := extractTempFromSummary(respMap); ok {
+                        chipTemp = fmt.Sprintf("%.1f", t)
+                    }
+                }
+
+                if val, ok := respMap["Accepted"]; ok {
+                    accepted = fmt.Sprintf("%v", val)
+                }
 				if val, ok := respMap["Rejected"]; ok {
 					rejected = fmt.Sprintf("%v", val)
 				}
@@ -484,15 +494,16 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			}
 		}
 
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
-			result.IP,
-			result.Port,
-			hashrate,
-			accepted,
-			rejected,
-			hwErrors,
-			uptime,
-		)
+        fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+            result.IP,
+            result.Port,
+            hashrate,
+            chipTemp,
+            accepted,
+            rejected,
+            hwErrors,
+            uptime,
+        )
 	}
 
 	w.Flush()
@@ -505,4 +516,35 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	}
 
 	return nil
+}
+
+// extractTempFromSummary scans a summary response map for plausible
+// temperature fields and returns a representative value.
+func extractTempFromSummary(resp map[string]interface{}) (float64, bool) {
+    // Prefer explicit fields
+    preferredKeys := []string{"Temperature", "Chip Temp", "ChipTemp", "Temp"}
+    for _, k := range preferredKeys {
+        if v, ok := resp[k]; ok {
+            t := toFloat64(v)
+            if t > 0 && t <= 200 {
+                return t, true
+            }
+        }
+    }
+    // Fallback: scan any temp-like keys
+    maxT := 0.0
+    found := false
+    for k, v := range resp {
+        lk := strings.ToLower(k)
+        if strings.Contains(lk, "temp") {
+            t := toFloat64(v)
+            if t > 0 && t <= 200 {
+                if !found || t > maxT {
+                    maxT = t
+                    found = true
+                }
+            }
+        }
+    }
+    return maxT, found
 }
