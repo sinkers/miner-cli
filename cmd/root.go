@@ -102,17 +102,17 @@ func init() {
 		switch cmdCopy {
 		case "switchpool", "enablepool", "disablepool", "removepool":
 			cobraCmd.Flags().IntVar(&poolID, "pool", 0, "Pool ID")
-			cobraCmd.MarkFlagRequired("pool")
+			_ = cobraCmd.MarkFlagRequired("pool")
 		case "addpool":
 			cobraCmd.Flags().StringVar(&poolURL, "url", "", "Pool URL")
 			cobraCmd.Flags().StringVar(&poolUser, "user", "", "Pool username")
 			cobraCmd.Flags().StringVar(&poolPass, "pass", "", "Pool password")
-			cobraCmd.MarkFlagRequired("url")
-			cobraCmd.MarkFlagRequired("user")
-			cobraCmd.MarkFlagRequired("pass")
+			_ = cobraCmd.MarkFlagRequired("url")
+			_ = cobraCmd.MarkFlagRequired("user")
+			_ = cobraCmd.MarkFlagRequired("pass")
 		case "custom":
 			cobraCmd.Flags().StringVar(&customCmd, "cmd", "", "Custom command to execute")
-			cobraCmd.MarkFlagRequired("cmd")
+			_ = cobraCmd.MarkFlagRequired("cmd")
 		}
 
 		rootCmd.AddCommand(cobraCmd)

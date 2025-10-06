@@ -22,8 +22,48 @@ func captureOutput(f func()) string {
 	os.Stdout = old
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 	return buf.String()
+}
+
+// getTestResults returns common test result sets to avoid duplication
+func getTestResults() struct {
+	single   []client.Result
+	multiple []client.Result
+	empty    []client.Result
+} {
+	return struct {
+		single   []client.Result
+		multiple []client.Result
+		empty    []client.Result
+	}{
+		single: []client.Result{
+			{
+				IP:       "192.168.1.1",
+				Port:     4028,
+				Command:  "summary",
+				Response: map[string]interface{}{"hashrate": 1000.0},
+				Duration: "100ms",
+			},
+		},
+		multiple: []client.Result{
+			{
+				IP:       "192.168.1.1",
+				Port:     4028,
+				Command:  "summary",
+				Response: map[string]interface{}{"hashrate": 1000.0},
+				Duration: "100ms",
+			},
+			{
+				IP:       "192.168.1.2",
+				Port:     4028,
+				Command:  "summary",
+				Error:    "connection timeout",
+				Duration: "5s",
+			},
+		},
+		empty: []client.Result{},
+	}
 }
 
 func TestGetFormatter(t *testing.T) {
@@ -65,47 +105,25 @@ func TestGetFormatter(t *testing.T) {
 }
 
 func TestJSONFormatter(t *testing.T) {
+	testData := getTestResults()
 	tests := []struct {
 		name    string
 		results []client.Result
 		pretty  bool
 	}{
 		{
-			name: "Single successful result",
-			results: []client.Result{
-				{
-					IP:       "192.168.1.1",
-					Port:     4028,
-					Command:  "summary",
-					Response: map[string]interface{}{"hashrate": 1000.0},
-					Duration: "100ms",
-				},
-			},
-			pretty: false,
+			name:    "Single successful result",
+			results: testData.single,
+			pretty:  false,
 		},
 		{
-			name: "Multiple mixed results",
-			results: []client.Result{
-				{
-					IP:       "192.168.1.1",
-					Port:     4028,
-					Command:  "summary",
-					Response: map[string]interface{}{"hashrate": 1000.0},
-					Duration: "100ms",
-				},
-				{
-					IP:       "192.168.1.2",
-					Port:     4028,
-					Command:  "summary",
-					Error:    "connection timeout",
-					Duration: "5s",
-				},
-			},
-			pretty: true,
+			name:    "Multiple mixed results",
+			results: testData.multiple,
+			pretty:  true,
 		},
 		{
 			name:    "Empty results",
-			results: []client.Result{},
+			results: testData.empty,
 			pretty:  false,
 		},
 	}
@@ -233,47 +251,25 @@ func TestColorFormatter(t *testing.T) {
 }
 
 func TestTableFormatter(t *testing.T) {
+	testData := getTestResults()
 	tests := []struct {
 		name    string
 		results []client.Result
 		verbose bool
 	}{
 		{
-			name: "Single result",
-			results: []client.Result{
-				{
-					IP:       "192.168.1.1",
-					Port:     4028,
-					Command:  "summary",
-					Response: map[string]interface{}{"test": "data"},
-					Duration: "100ms",
-				},
-			},
+			name:    "Single result",
+			results: testData.single,
 			verbose: false,
 		},
 		{
-			name: "Multiple results with verbose",
-			results: []client.Result{
-				{
-					IP:       "192.168.1.1",
-					Port:     4028,
-					Command:  "summary",
-					Response: map[string]interface{}{"hashrate": 1000.0},
-					Duration: "100ms",
-				},
-				{
-					IP:       "192.168.1.2",
-					Port:     4028,
-					Command:  "summary",
-					Error:    "timeout",
-					Duration: "5s",
-				},
-			},
+			name:    "Multiple results with verbose",
+			results: testData.multiple,
 			verbose: true,
 		},
 		{
 			name:    "Empty results",
-			results: []client.Result{},
+			results: testData.empty,
 			verbose: false,
 		},
 	}
@@ -389,7 +385,7 @@ func BenchmarkJSONFormatter(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		captureOutput(func() {
-			formatter.Format(results)
+			_ = formatter.Format(results)
 		})
 	}
 }
@@ -417,7 +413,7 @@ func BenchmarkColorFormatter(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		captureOutput(func() {
-			formatter.Format(results)
+			_ = formatter.Format(results)
 		})
 	}
 }
@@ -445,7 +441,7 @@ func BenchmarkTableFormatter(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		captureOutput(func() {
-			formatter.Format(results)
+			_ = formatter.Format(results)
 		})
 	}
 }

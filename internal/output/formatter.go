@@ -376,7 +376,7 @@ func toFloat64(v interface{}) float64 {
 		return float64(val)
 	case string:
 		var f float64
-		fmt.Sscanf(val, "%f", &f)
+		_, _ = fmt.Sscanf(val, "%f", &f)
 		return f
 	default:
 		return 0
