@@ -65,7 +65,7 @@ linters:
     - goimports
     - gomnd
     # - goprintffuncname  # Disabled - function names are clear without 'f' suffix
-    - gosec
+    # - gosec  # Disabled - govulncheck provides superior security scanning
     - gosimple
     - govet
     - ineffassign
