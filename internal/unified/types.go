@@ -12,23 +12,23 @@ import (
 type APIType string
 
 const (
-	APITypeCGMiner  APIType = "cgminer"
-	APITypeVNish    APIType = "vnish"
-	APITypeBraiins  APIType = "braiins"
-	APITypeUnknown  APIType = "unknown"
+	APITypeCGMiner APIType = "cgminer"
+	APITypeVNish   APIType = "vnish"
+	APITypeBraiins APIType = "braiins"
+	APITypeUnknown APIType = "unknown"
 )
 
 // MinerStatus represents the current mining status
 type MinerStatus string
 
 const (
-	StatusRunning  MinerStatus = "running"
-	StatusPaused   MinerStatus = "paused"
-	StatusStopped  MinerStatus = "stopped"
-	StatusTuning   MinerStatus = "tuning"
-	StatusError    MinerStatus = "error"
-	StatusOffline  MinerStatus = "offline"
-	StatusUnknown  MinerStatus = "unknown"
+	StatusRunning MinerStatus = "running"
+	StatusPaused  MinerStatus = "paused"
+	StatusStopped MinerStatus = "stopped"
+	StatusTuning  MinerStatus = "tuning"
+	StatusError   MinerStatus = "error"
+	StatusOffline MinerStatus = "offline"
+	StatusUnknown MinerStatus = "unknown"
 )
 
 // MinerAPI is the unified interface for all miner types
@@ -69,19 +69,19 @@ type MinerAPI interface {
 // UnifiedSummary contains all summary information across different APIs
 type UnifiedSummary struct {
 	// Basic Information
-	IPAddress    string      `json:"ip_address"`
-	APIType      APIType     `json:"api_type"`
-	Model        string      `json:"model"`
-	Firmware     string      `json:"firmware"`
-	Version      string      `json:"version"`
-	Uptime       time.Duration `json:"uptime"`
+	IPAddress string        `json:"ip_address"`
+	APIType   APIType       `json:"api_type"`
+	Model     string        `json:"model"`
+	Firmware  string        `json:"firmware"`
+	Version   string        `json:"version"`
+	Uptime    time.Duration `json:"uptime"`
 
 	// Mining Status
 	Status       MinerStatus `json:"status"`
 	StatusDetail string      `json:"status_detail"`
 
 	// Performance Metrics
-	HashRate     float64 `json:"hashrate"`      // Default unit (TH/s for modern miners)
+	HashRate     float64 `json:"hashrate"` // Default unit (TH/s for modern miners)
 	HashRateUnit string  `json:"hashrate_unit"`
 	HashRate5s   float64 `json:"hashrate_5s"`
 	HashRate1m   float64 `json:"hashrate_1m"`

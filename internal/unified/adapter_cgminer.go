@@ -32,13 +32,13 @@ func NewCGMinerAdapter(host string, port int, timeout time.Duration) *CGMinerAda
 // Connect establishes connection to the miner
 func (a *CGMinerAdapter) Connect(ctx context.Context) error {
 	a.client = cgminer.NewCGMiner(a.host, a.port, a.timeout)
-	
+
 	// Test connection with version command
 	_, err := a.client.Version()
 	if err != nil {
 		return fmt.Errorf("failed to connect to CGMiner: %w", err)
 	}
-	
+
 	a.connected = true
 	return nil
 }
@@ -69,7 +69,7 @@ func (a *CGMinerAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 	}
 
 	start := time.Now()
-	
+
 	// Get summary data
 	summary, err := a.client.Summary()
 	if err != nil {
@@ -78,10 +78,10 @@ func (a *CGMinerAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 
 	// Get version for model/firmware info
 	version, _ := a.client.Version()
-	
+
 	// Get device information for board count
 	devs, _ := a.client.Devs()
-	
+
 	// Get pool information
 	pools, _ := a.client.Pools()
 
@@ -114,10 +114,10 @@ func (a *CGMinerAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 		// Convert MHS to THS for modern miners
 		mhs5s := summary.MHS5s
 		mhsAv := summary.MHSav
-		
+
 		// Check if it's actually GHS (newer miners)
 		if summary.GHS5s > 0 {
-			unified.HashRate5s = summary.GHS5s / 1000.0  // Convert GHS to THS
+			unified.HashRate5s = summary.GHS5s / 1000.0 // Convert GHS to THS
 			unified.HashRate = summary.GHSav / 1000.0
 			unified.HashRateUnit = "TH/s"
 		} else if mhs5s > 1000000 { // Likely THS reported as MHS
@@ -141,7 +141,7 @@ func (a *CGMinerAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 		unified.Accepted = summary.Accepted
 		unified.Rejected = summary.Rejected
 		unified.HWErrors = summary.HardwareErrors
-		
+
 		// Uptime
 		unified.Uptime = time.Duration(summary.Elapsed) * time.Second
 	}
@@ -150,17 +150,17 @@ func (a *CGMinerAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 	if devs != nil {
 		unified.BoardsTotal = len(*devs)
 		unified.BoardsActive = 0
-		
+
 		totalTemp := 0.0
 		tempCount := 0
 		unified.TempMax = 0.0
 		unified.TempMin = 999.0
-		
+
 		for _, dev := range *devs {
 			if dev.Status == "Alive" {
 				unified.BoardsActive++
 			}
-			
+
 			// Temperature tracking
 			if dev.Temperature > 0 {
 				totalTemp += dev.Temperature
@@ -172,11 +172,11 @@ func (a *CGMinerAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error
 					unified.TempMin = dev.Temperature
 				}
 			}
-			
+
 			// Accumulate hardware errors
 			unified.HWErrors += dev.HardwareErrors
 		}
-		
+
 		// Calculate average temperature
 		if tempCount > 0 {
 			unified.TempAvg = totalTemp / float64(tempCount)
@@ -262,12 +262,12 @@ func (a *CGMinerAdapter) GetPools(ctx context.Context) ([]Pool, error) {
 			Accepted: p.Accepted,
 			Rejected: p.Rejected,
 		}
-		
+
 		// Convert last share time
 		if p.LastShareTime > 0 {
 			pool.LastShare = time.Unix(p.LastShareTime, 0)
 		}
-		
+
 		pools = append(pools, pool)
 	}
 
@@ -387,11 +387,11 @@ func (a *CGMinerAdapter) GetConfig(ctx context.Context) (map[string]interface{},
 	// CGMiner has a config command but it's limited
 	// Return basic configuration from pools and version
 	config := make(map[string]interface{})
-	
+
 	if pools, err := a.client.Pools(); err == nil {
 		config["pools"] = pools
 	}
-	
+
 	if version, err := a.client.Version(); err == nil && version != nil && len(*version) > 0 {
 		config["version"] = (*version)[0]
 	}

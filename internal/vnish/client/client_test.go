@@ -86,7 +86,7 @@ func TestGetInfo(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Errorf("expected method GET, got %s", r.Method)
 		}
-		
+
 		// Check API key header
 		if apiKey := r.Header.Get("X-API-Key"); apiKey != "test-key" {
 			t.Errorf("expected API key test-key, got %s", apiKey)
@@ -99,14 +99,14 @@ func TestGetInfo(t *testing.T) {
 			Uptime:      86400,
 			LoadAverage: []float64{1.5, 1.2, 1.0},
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
 	client := NewClient(server.URL[7:], WithAPIKey("test-key")) // Remove http://
-	client.baseURL = server.URL + "/api/v1" // Override for test
+	client.baseURL = server.URL + "/api/v1"                     // Override for test
 
 	info, err := client.GetInfo(context.Background())
 	if err != nil {
@@ -168,7 +168,7 @@ func TestGetSummary(t *testing.T) {
 			FanSpeed: []int{4500, 4600},
 			Uptime:   86400,
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
 	}))
@@ -198,9 +198,9 @@ func TestGetSummary(t *testing.T) {
 
 func TestMiningOperations(t *testing.T) {
 	tests := []struct {
-		name     string
-		method   func(*Client, context.Context) error
-		path     string
+		name       string
+		method     func(*Client, context.Context) error
+		path       string
 		httpMethod string
 	}{
 		{
@@ -208,7 +208,7 @@ func TestMiningOperations(t *testing.T) {
 			method: func(c *Client, ctx context.Context) error {
 				return c.StartMining(ctx)
 			},
-			path: "/api/v1/mining/start",
+			path:       "/api/v1/mining/start",
 			httpMethod: http.MethodPost,
 		},
 		{
@@ -216,7 +216,7 @@ func TestMiningOperations(t *testing.T) {
 			method: func(c *Client, ctx context.Context) error {
 				return c.StopMining(ctx)
 			},
-			path: "/api/v1/mining/stop",
+			path:       "/api/v1/mining/stop",
 			httpMethod: http.MethodPost,
 		},
 		{
@@ -224,7 +224,7 @@ func TestMiningOperations(t *testing.T) {
 			method: func(c *Client, ctx context.Context) error {
 				return c.RestartMining(ctx)
 			},
-			path: "/api/v1/mining/restart",
+			path:       "/api/v1/mining/restart",
 			httpMethod: http.MethodPost,
 		},
 		{
@@ -232,7 +232,7 @@ func TestMiningOperations(t *testing.T) {
 			method: func(c *Client, ctx context.Context) error {
 				return c.PauseMining(ctx)
 			},
-			path: "/api/v1/mining/pause",
+			path:       "/api/v1/mining/pause",
 			httpMethod: http.MethodPost,
 		},
 		{
@@ -240,7 +240,7 @@ func TestMiningOperations(t *testing.T) {
 			method: func(c *Client, ctx context.Context) error {
 				return c.ResumeMining(ctx)
 			},
-			path: "/api/v1/mining/resume",
+			path:       "/api/v1/mining/resume",
 			httpMethod: http.MethodPost,
 		},
 	}
@@ -274,16 +274,16 @@ func TestSwitchPool(t *testing.T) {
 		if r.URL.Path != "/api/v1/mining/switch-pool" {
 			t.Errorf("expected path /api/v1/mining/switch-pool, got %s", r.URL.Path)
 		}
-		
+
 		var req models.SwitchPoolRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("failed to decode request: %v", err)
 		}
-		
+
 		if req.PoolID != 2 {
 			t.Errorf("expected pool ID 2, got %d", req.PoolID)
 		}
-		
+
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -323,7 +323,7 @@ func TestGetChains(t *testing.T) {
 				HashRate:    33.8,
 			},
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
 	}))
@@ -340,7 +340,7 @@ func TestGetChains(t *testing.T) {
 	if len(chains) != 2 {
 		t.Errorf("expected 2 chains, got %d", len(chains))
 	}
-	
+
 	if chains[0].Index != 0 {
 		t.Errorf("expected chain 0 index 0, got %d", chains[0].Index)
 	}
@@ -354,10 +354,10 @@ func TestGetChains(t *testing.T) {
 
 func TestErrorHandling(t *testing.T) {
 	tests := []struct {
-		name           string
-		statusCode     int
-		responseBody   string
-		expectedError  string
+		name          string
+		statusCode    int
+		responseBody  string
+		expectedError string
 	}{
 		{
 			name:          "401 Unauthorized",
@@ -394,7 +394,7 @@ func TestErrorHandling(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			
+
 			if !contains(err.Error(), tt.expectedError) {
 				t.Errorf("expected error containing '%s', got '%s'", tt.expectedError, err.Error())
 			}
@@ -452,7 +452,7 @@ func TestAPIKeyOperations(t *testing.T) {
 
 			var req models.AddApikeyQuery
 			_ = json.NewDecoder(r.Body).Decode(&req)
-			
+
 			if req.Name != "New Test Key" {
 				t.Errorf("expected key name 'New Test Key', got %s", req.Name)
 			}
@@ -494,7 +494,7 @@ func TestAPIKeyOperations(t *testing.T) {
 
 			var req models.DeleteApikeyQuery
 			_ = json.NewDecoder(r.Body).Decode(&req)
-			
+
 			if req.ID != "key-to-delete" {
 				t.Errorf("expected key ID 'key-to-delete', got %s", req.ID)
 			}
@@ -593,7 +593,7 @@ func TestSettingsOperations(t *testing.T) {
 
 			var settings models.Settings
 			_ = json.NewDecoder(r.Body).Decode(&settings)
-			
+
 			if settings.Fan.Mode != "manual" {
 				t.Errorf("expected fan mode 'manual', got %s", settings.Fan.Mode)
 			}

@@ -23,7 +23,7 @@ func main() {
 		client.WithTimeout(10 * time.Second),
 		client.WithDebug(*debug),
 	}
-	
+
 	if *apiKey != "" {
 		opts = append(opts, client.WithAPIKey(*apiKey))
 	}
@@ -55,13 +55,13 @@ func main() {
 		fmt.Printf("Efficiency: %.2f J/TH\n", summary.Performance.Efficiency)
 		fmt.Printf("Accepted Shares: %d\n", summary.Performance.Accepted)
 		fmt.Printf("Rejected Shares: %d\n", summary.Performance.Rejected)
-		
+
 		fmt.Println("\nPools:")
 		for _, pool := range summary.Pools {
-			fmt.Printf("  [%d] %s (%s) - Status: %s\n", 
+			fmt.Printf("  [%d] %s (%s) - Status: %s\n",
 				pool.ID, pool.URL, pool.User, pool.Status)
 		}
-		
+
 		fmt.Println("\nTemperatures:")
 		fmt.Printf("  Intake: %.1f°C\n", summary.Temperature.Intake)
 		fmt.Printf("  Outlet: %.1f°C\n", summary.Temperature.Outlet)
@@ -85,7 +85,7 @@ func main() {
 	} else {
 		for _, chain := range chains {
 			fmt.Printf("Chain %d: Status=%s, Freq=%dMHz, Voltage=%.2fV, Temp=%.1f°C, Chips=%d, HashRate=%.2fTH/s\n",
-				chain.Index, chain.Status, chain.Frequency, chain.Voltage, 
+				chain.Index, chain.Status, chain.Frequency, chain.Voltage,
 				chain.Temperature, chain.ChipCount, chain.HashRate)
 		}
 	}

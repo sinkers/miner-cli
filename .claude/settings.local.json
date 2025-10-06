@@ -33,7 +33,8 @@
       "Read(//dev/**)",
       "Bash(goimports:*)",
       "Bash(go install:*)",
-      "Bash(~/go/bin/goimports -w cmd/root.go cmd/test-braiins/main.go internal/braiins/models/simple_models.go)"
+      "Bash(~/go/bin/goimports -w cmd/root.go cmd/test-braiins/main.go internal/braiins/models/simple_models.go)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
