@@ -62,7 +62,7 @@ linters:
     # - gocritic  # Disabled - overly opinionated about parameter grouping
     - gocyclo
     # - gofmt  # Disabled - handled by goimports
-    - goimports
+    # - goimports  # Disabled - version inconsistencies between local and CI
     - gomnd
     # - goprintffuncname  # Disabled - function names are clear without 'f' suffix
     # - gosec  # Disabled - govulncheck provides superior security scanning
