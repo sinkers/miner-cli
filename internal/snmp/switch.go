@@ -19,7 +19,7 @@ type SwitchClient struct {
 
 // PortMACMap represents the MAC address to port mapping
 type PortMACMap struct {
-	mu       sync.RWMutex
+	mu        sync.RWMutex
 	macToPort map[string]string // MAC address -> interface name (e.g., "Fa0/17")
 }
 
@@ -31,11 +31,11 @@ type VLANInfo struct {
 
 const (
 	// OIDs for SNMP queries
-	oidIfName           = "1.3.6.1.2.1.31.1.1.1.1"     // Interface names
-	oidIfOperStatus     = "1.3.6.1.2.1.2.2.1.8"        // Interface operational status
-	oidVLANs            = "1.3.6.1.4.1.9.9.46.1.3.1.1.2" // Cisco VTP VLAN state
-	oidMACFDB           = "1.3.6.1.2.1.17.4.3.1.2"     // MAC forwarding database
-	oidBridgePortIfIndex = "1.3.6.1.2.1.17.1.4.1.2"    // Bridge port to ifIndex mapping
+	oidIfName            = "1.3.6.1.2.1.31.1.1.1.1"       // Interface names
+	oidIfOperStatus      = "1.3.6.1.2.1.2.2.1.8"          // Interface operational status
+	oidVLANs             = "1.3.6.1.4.1.9.9.46.1.3.1.1.2" // Cisco VTP VLAN state
+	oidMACFDB            = "1.3.6.1.2.1.17.4.3.1.2"       // MAC forwarding database
+	oidBridgePortIfIndex = "1.3.6.1.2.1.17.1.4.1.2"       // Bridge port to ifIndex mapping
 )
 
 // NewSwitchClient creates a new SNMP client for querying switches
@@ -331,7 +331,7 @@ func (sc *SwitchClient) queryVLAN(vlan string, interfaces map[string]string, sta
 // mustAtoi converts string to int, returns 0 on error
 func mustAtoi(s string) int {
 	var result int
-	fmt.Sscanf(s, "%d", &result)
+	_, _ = fmt.Sscanf(s, "%d", &result)
 	return result
 }
 

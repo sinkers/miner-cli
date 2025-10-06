@@ -323,10 +323,33 @@ make test-verbose      # Detailed test output
 ### Development Tools
 
 ```bash
-make dev-setup    # Install development tools
+make dev-setup    # Install development tools (includes golangci-lint)
 make fmt          # Format code
 make lint         # Run linter
-make check        # Run all checks
+make check        # Run all checks (fmt, vet, lint, test)
+```
+
+### Pre-Push Checklist
+
+**Before pushing changes, always run:**
+
+```bash
+make check
+```
+
+This runs:
+1. `make fmt` - Formats code
+2. `make vet` - Runs go vet
+3. `make lint` - Runs golangci-lint (must be installed via `make dev-setup`)
+4. `make test` - Runs all tests
+
+The CI pipeline runs these same checks. Running locally first saves time and prevents failed CI builds.
+
+**Note**: `golangci-lint` is required for linting. Install it with:
+```bash
+make dev-setup
+# or manually:
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 ### CI/CD
@@ -334,6 +357,7 @@ make check        # Run all checks
 The project uses GitHub Actions for:
 - Automated testing with race detection
 - Cross-platform builds (Linux, macOS, Windows)
+- Code linting with golangci-lint
 - Security scanning with Gosec and govulncheck
 - Code coverage reporting
 

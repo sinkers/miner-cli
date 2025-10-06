@@ -40,7 +40,10 @@ var (
 	braiinsPassword string
 )
 
-const Version = "1.0.0"
+const (
+	Version          = "1.0.0"
+	outputFormatJSON = "json"
+)
 
 var rootCmd = &cobra.Command{
 	Use:     "miner-cli",
@@ -176,7 +179,7 @@ func executeCommand(command string) error {
 		return fmt.Errorf("no valid IPs in specified ranges")
 	}
 
-	if outputFormat != "json" {
+	if outputFormat != outputFormatJSON {
 		fmt.Printf("Executing '%s' on %d hosts...\n", command, len(ips))
 	}
 
@@ -224,7 +227,7 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no valid IPs in specified ranges")
 	}
 
-	if outputFormat != "json" {
+	if outputFormat != outputFormatJSON {
 		fmt.Printf("Scanning %d hosts for active miners...\n", len(ips))
 	}
 
@@ -232,76 +235,78 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	cgClient := client.NewClient(time.Duration(timeout)*time.Second, workers)
-	// Use summary command to get more detailed info including hashrate
 	results := cgClient.ExecuteCommand(ctx, ips, port, "summary", nil)
 
-	// Detect firmware by querying Braiins API for active miners
+	// Detect and enrich firmware information
+	enrichFirmwareInfo(results)
+
+	// Setup switch port mapping if requested
+	portMap, arpCache := setupSwitchMapping()
+
+	// Build list of active IPs and firmware map
+	activeIPs, firmwareMap := extractActiveMiners(results)
+
+	// Resolve MAC addresses if doing port lookups
+	macAddresses := resolveMACAddresses(arpCache, activeIPs)
+
+	// Enrich results with temperature, power, and port data
+	enrichMinerData(ctx, cgClient, results, activeIPs, firmwareMap, macAddresses, portMap, arpCache)
+
+	if outputFormat == outputFormatJSON {
+		formatter := output.GetFormatter(outputFormat, verbose)
+		return formatter.Format(results)
+	}
+
+	// Use the new scan formatter for better output
+	formatter := output.GetFormatter("scan", verbose)
+	return formatter.Format(results)
+}
+
+// enrichFirmwareInfo detects and adds firmware information to results
+func enrichFirmwareInfo(results []client.Result) {
 	for i := range results {
 		if results[i].Error == "" && results[i].Response != nil {
-			// Try to detect Braiins OS
-			if firmware := getBraaiinsFirmwareInfo(results[i].IP); firmware != "" {
-				// Add firmware info to the response map
-				switch resp := results[i].Response.(type) {
-				case map[string]interface{}:
-					resp["firmware"] = firmware
-				default:
-					// Convert to a generic map if needed
-					b, err := json.Marshal(results[i].Response)
-					if err == nil {
-						var m map[string]interface{}
-						if json.Unmarshal(b, &m) == nil {
-							m["firmware"] = firmware
-							results[i].Response = m
-						}
-					}
-				}
-			} else {
-				// Default to "Stock" if not Braiins
-				switch resp := results[i].Response.(type) {
-				case map[string]interface{}:
-					resp["firmware"] = "Stock"
-				default:
-					b, err := json.Marshal(results[i].Response)
-					if err == nil {
-						var m map[string]interface{}
-						if json.Unmarshal(b, &m) == nil {
-							m["firmware"] = "Stock"
-							results[i].Response = m
-						}
-					}
-				}
+			firmware := getBraaiinsFirmwareInfo(results[i].IP)
+			if firmware == "" {
+				firmware = "Stock"
 			}
+			addFieldToResponse(&results[i], "firmware", firmware)
 		}
 	}
+}
 
-	// Query switch for MAC address to port mapping if --switch is provided
-	var portMap *snmp.PortMACMap
-	var arpCache *snmp.ARPCache
-	if switchIP != "" {
-		if outputFormat != "json" {
-			fmt.Printf("Querying switch %s for port mappings...\n", switchIP)
-		}
-		switchClient := snmp.NewSwitchClient(switchIP, switchCommunity)
-		var err error
-		portMap, err = switchClient.GetMACAddressTable()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to query switch: %v\n", err)
-		} else if outputFormat != "json" {
-			fmt.Printf("Retrieved %d MAC-to-port mappings from switch\n", portMap.Size())
-		}
-
-		// Initialize ARP cache for MAC address lookups
-		arpCache = snmp.NewARPCache()
+// setupSwitchMapping initializes switch port mapping if requested
+func setupSwitchMapping() (*snmp.PortMACMap, *snmp.ARPCache) {
+	if switchIP == "" {
+		return nil, nil
 	}
 
-	// Enrich with chip temperature (always enabled now)
-	// Build list of active IPs with their firmware info
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Querying switch %s for port mappings...\n", switchIP)
+	}
+
+	switchClient := snmp.NewSwitchClient(switchIP, switchCommunity)
+	portMap, err := switchClient.GetMACAddressTable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to query switch: %v\n", err)
+		return nil, nil
+	}
+
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Retrieved %d MAC-to-port mappings from switch\n", portMap.Size())
+	}
+
+	return portMap, snmp.NewARPCache()
+}
+
+// extractActiveMiners builds list of active IPs and their firmware info
+func extractActiveMiners(results []client.Result) ([]string, map[string]string) {
 	activeIPs := make([]string, 0, len(results))
 	firmwareMap := make(map[string]string)
+
 	for _, r := range results {
 		if r.Error == "" {
 			activeIPs = append(activeIPs, r.IP)
-			// Extract firmware info
 			if r.Response != nil {
 				if respMap, ok := r.Response.(map[string]interface{}); ok {
 					if fw, ok := respMap["firmware"].(string); ok {
@@ -312,174 +317,163 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get MAC addresses for active miners if we need port lookups
-	macAddresses := make(map[string]string) // IP -> MAC address
-	if arpCache != nil && len(activeIPs) > 0 {
-		if outputFormat != "json" {
-			fmt.Printf("Resolving MAC addresses for %d active miners...\n", len(activeIPs))
-		}
+	return activeIPs, firmwareMap
+}
 
-		// First, ping all miners to populate ARP cache
-		// This is done in parallel to speed things up
-		for _, ip := range activeIPs {
-			go snmp.Ping(ip) // Fire and forget - we just want to populate ARP
-		}
-
-		// Give pings a moment to complete
-		time.Sleep(500 * time.Millisecond)
-
-		macAddresses = arpCache.BulkGetMACs(activeIPs)
-		if outputFormat != "json" {
-			fmt.Printf("Resolved %d MAC addresses via ARP\n", len(macAddresses))
-		}
+// resolveMACAddresses retrieves MAC addresses for active miners
+func resolveMACAddresses(arpCache *snmp.ARPCache, activeIPs []string) map[string]string {
+	macAddresses := make(map[string]string)
+	if arpCache == nil || len(activeIPs) == 0 {
+		return macAddresses
 	}
-	if len(activeIPs) > 0 {
-		temps := make(map[string]float64)
 
-		// Query Braiins API for miners running Braiins OS
-		braiiinsIPs := make([]string, 0)
-		otherIPs := make([]string, 0)
-		for _, ip := range activeIPs {
-			if fw, ok := firmwareMap[ip]; ok && strings.Contains(strings.ToLower(fw), "braiins") {
-				braiiinsIPs = append(braiiinsIPs, ip)
-			} else {
-				otherIPs = append(otherIPs, ip)
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Resolving MAC addresses for %d active miners...\n", len(activeIPs))
+	}
+
+	for _, ip := range activeIPs {
+		go func(addr string) {
+			_ = snmp.Ping(addr)
+		}(ip)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	macAddresses = arpCache.BulkGetMACs(activeIPs)
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Resolved %d MAC addresses via ARP\n", len(macAddresses))
+	}
+
+	return macAddresses
+}
+
+// enrichMinerData adds temperature, power, and port information to results
+func enrichMinerData(ctx context.Context, cgClient *client.Client, results []client.Result,
+	activeIPs []string, firmwareMap map[string]string, macAddresses map[string]string,
+	portMap *snmp.PortMACMap, arpCache *snmp.ARPCache) {
+	if len(activeIPs) == 0 {
+		return
+	}
+
+	temps := make(map[string]float64)
+	braiinsStats := fetchBraiinsData(activeIPs, firmwareMap, temps, macAddresses, arpCache)
+	fetchNonBraiinsTemps(ctx, cgClient, activeIPs, firmwareMap, temps)
+	mergeDataIntoResults(results, temps, braiinsStats, macAddresses, portMap)
+}
+
+// fetchBraiinsData gets temperature and stats from Braiins miners
+func fetchBraiinsData(activeIPs []string, firmwareMap map[string]string, temps map[string]float64,
+	macAddresses map[string]string, arpCache *snmp.ARPCache) map[string]BraiinsStats {
+	braiinsStats := make(map[string]BraiinsStats)
+	for _, ip := range activeIPs {
+		fw, ok := firmwareMap[ip]
+		if !ok || !strings.Contains(strings.ToLower(fw), "braiins") {
+			continue
+		}
+
+		if stats, ok := getBraiinsStats(ip); ok {
+			braiinsStats[ip] = stats
+			if stats.ChipTemp > 0 {
+				temps[ip] = stats.ChipTemp
 			}
 		}
 
-		// Fetch stats from Braiins GraphQL API and MAC addresses via gRPC if needed
-		braiinsStats := make(map[string]BraiinsStats)
-		if len(braiiinsIPs) > 0 {
-			for _, ip := range braiiinsIPs {
-				if stats, ok := getBraiinsStats(ip); ok {
-					braiinsStats[ip] = stats
-					if stats.ChipTemp > 0 {
-						temps[ip] = stats.ChipTemp
-					}
-				}
-
-				// Get MAC address from Braiins miner if we're doing port lookup and don't have it yet
-				if arpCache != nil {
-					if _, hasMac := macAddresses[ip]; !hasMac {
-						if mac, ok := getBraaiinsMACAddress(ip, braiinsUsername, braiinsPassword); ok && mac != "" {
-							macAddresses[ip] = mac
-						}
-					}
-				}
-			}
-		}
-
-		// For non-Braiins miners, try devs/stats
-		if len(otherIPs) > 0 {
-			// First attempt via `devs`
-			devResults := cgClient.ExecuteCommand(ctx, otherIPs, port, "devs", nil)
-			for _, dr := range devResults {
-				if dr.Error != "" || dr.Response == nil {
-					continue
-				}
-				if t, ok := extractChipTempFromDevs(dr.Response); ok {
-					temps[dr.IP] = t
-				}
-			}
-
-			// Fallback to `stats` for IPs with no temp yet
-			missing := make([]string, 0, len(otherIPs))
-			for _, ip := range otherIPs {
-				if _, ok := temps[ip]; !ok {
-					missing = append(missing, ip)
-				}
-			}
-			if len(missing) > 0 {
-				statsResults := cgClient.ExecuteCommand(ctx, missing, port, "stats", nil)
-				for _, sr := range statsResults {
-					if sr.Error != "" || sr.Response == nil {
-						continue
-					}
-					if t, ok := extractChipTempFromStats(sr.Response); ok {
-						temps[sr.IP] = t
-					}
-				}
-			}
-		}
-
-		// Merge into main results by adding chip_temp_c, power, tuning, and port data into the Response map
-		for i := range results {
-			// Add temperature data
-			if t, ok := temps[results[i].IP]; ok {
-				switch resp := results[i].Response.(type) {
-				case map[string]interface{}:
-					resp["chip_temp_c"] = t
-					results[i].Response = resp
-				default:
-					b, err := json.Marshal(results[i].Response)
-					if err == nil {
-						var m map[string]interface{}
-						if json.Unmarshal(b, &m) == nil {
-							m["chip_temp_c"] = t
-							results[i].Response = m
-						}
-					}
-				}
-			}
-
-			// Add Braiins-specific stats (power and tuning)
-			if stats, ok := braiinsStats[results[i].IP]; ok {
-				switch resp := results[i].Response.(type) {
-				case map[string]interface{}:
-					if stats.PowerW > 0 {
-						resp["power_w"] = stats.PowerW
-					}
-					resp["tuning"] = stats.Tuning
-					resp["tuner_status"] = stats.TunerStatus
-					results[i].Response = resp
-				default:
-					b, err := json.Marshal(results[i].Response)
-					if err == nil {
-						var m map[string]interface{}
-						if json.Unmarshal(b, &m) == nil {
-							if stats.PowerW > 0 {
-								m["power_w"] = stats.PowerW
-							}
-							m["tuning"] = stats.Tuning
-							m["tuner_status"] = stats.TunerStatus
-							results[i].Response = m
-						}
-					}
-				}
-			}
-
-			// Add switch port information if available
-			if portMap != nil && results[i].Error == "" {
-				if mac, ok := macAddresses[results[i].IP]; ok && mac != "" {
-					if port, found := portMap.Get(mac); found {
-						switch resp := results[i].Response.(type) {
-						case map[string]interface{}:
-							resp["switch_port"] = port
-							results[i].Response = resp
-						default:
-							b, err := json.Marshal(results[i].Response)
-							if err == nil {
-								var m map[string]interface{}
-								if json.Unmarshal(b, &m) == nil {
-									m["switch_port"] = port
-									results[i].Response = m
-								}
-							}
-						}
-					}
+		if arpCache != nil {
+			if _, hasMac := macAddresses[ip]; !hasMac {
+				if mac, ok := getBraaiinsMACAddress(ip, braiinsUsername, braiinsPassword); ok && mac != "" {
+					macAddresses[ip] = mac
 				}
 			}
 		}
 	}
 
-	if outputFormat == "json" {
-		formatter := output.GetFormatter(outputFormat, verbose)
-		return formatter.Format(results)
+	return braiinsStats
+}
+
+// fetchNonBraiinsTemps gets temperatures from non-Braiins miners
+func fetchNonBraiinsTemps(ctx context.Context, cgClient *client.Client, activeIPs []string,
+	firmwareMap map[string]string, temps map[string]float64) {
+	otherIPs := make([]string, 0)
+	for _, ip := range activeIPs {
+		if fw, ok := firmwareMap[ip]; !ok || !strings.Contains(strings.ToLower(fw), "braiins") {
+			otherIPs = append(otherIPs, ip)
+		}
 	}
 
-	// Use the new scan formatter for better output
-	formatter := output.GetFormatter("scan", verbose)
-	return formatter.Format(results)
+	if len(otherIPs) == 0 {
+		return
+	}
+
+	devResults := cgClient.ExecuteCommand(ctx, otherIPs, port, "devs", nil)
+	for _, dr := range devResults {
+		if dr.Error == "" && dr.Response != nil {
+			if t, ok := extractChipTempFromDevs(dr.Response); ok {
+				temps[dr.IP] = t
+			}
+		}
+	}
+
+	missing := make([]string, 0, len(otherIPs))
+	for _, ip := range otherIPs {
+		if _, ok := temps[ip]; !ok {
+			missing = append(missing, ip)
+		}
+	}
+
+	if len(missing) > 0 {
+		statsResults := cgClient.ExecuteCommand(ctx, missing, port, "stats", nil)
+		for _, sr := range statsResults {
+			if sr.Error == "" && sr.Response != nil {
+				if t, ok := extractChipTempFromStats(sr.Response); ok {
+					temps[sr.IP] = t
+				}
+			}
+		}
+	}
+}
+
+// mergeDataIntoResults adds all enrichment data to results
+func mergeDataIntoResults(results []client.Result, temps map[string]float64,
+	braiinsStats map[string]BraiinsStats, macAddresses map[string]string, portMap *snmp.PortMACMap) {
+	for i := range results {
+		if t, ok := temps[results[i].IP]; ok {
+			addFieldToResponse(&results[i], "chip_temp_c", t)
+		}
+
+		if stats, ok := braiinsStats[results[i].IP]; ok {
+			if stats.PowerW > 0 {
+				addFieldToResponse(&results[i], "power_w", stats.PowerW)
+			}
+			addFieldToResponse(&results[i], "tuning", stats.Tuning)
+			addFieldToResponse(&results[i], "tuner_status", stats.TunerStatus)
+		}
+
+		if portMap != nil && results[i].Error == "" {
+			if mac, ok := macAddresses[results[i].IP]; ok && mac != "" {
+				if port, found := portMap.Get(mac); found {
+					addFieldToResponse(&results[i], "switch_port", port)
+				}
+			}
+		}
+	}
+}
+
+// addFieldToResponse adds a field to a result's response, handling type conversion
+func addFieldToResponse(result *client.Result, key string, value interface{}) {
+	switch resp := result.Response.(type) {
+	case map[string]interface{}:
+		resp[key] = value
+		result.Response = resp
+	default:
+		b, err := json.Marshal(result.Response)
+		if err == nil {
+			var m map[string]interface{}
+			if json.Unmarshal(b, &m) == nil {
+				m[key] = value
+				result.Response = m
+			}
+		}
+	}
 }
 
 // extractChipTempFromDevs attempts to extract a representative chip temperature
