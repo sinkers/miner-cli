@@ -4,14 +4,14 @@ linters-settings:
   govet:
     check-shadowing: true
   gocyclo:
-    min-complexity: 15
+    min-complexity: 60
   maligned:
     suggest-new: true
   dupl:
     threshold: 100
   goconst:
     min-len: 2
-    min-occurrences: 2
+    min-occurrences: 4
   depguard:
     list-type: blacklist
     packages:

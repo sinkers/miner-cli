@@ -24,7 +24,13 @@
       "Bash(git pull:*)",
       "Bash(gh pr create:*)",
       "Bash(gh run watch:*)",
-      "Bash(go get:*)"
+      "Bash(go get:*)",
+      "Bash(pip3 install:*)",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(snmpwalk:*)",
+      "Read(//dev/**)"
     ],
     "deny": [],
     "ask": []
