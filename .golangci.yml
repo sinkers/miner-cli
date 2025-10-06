@@ -50,7 +50,7 @@ linters:
   disable-all: true
   enable:
     - bodyclose
-    - deadcode
+    # - deadcode  # Deprecated - replaced by unused
     # - depguard  # Disabled as it incorrectly blocks internal and third-party imports
     - dogsled
     - dupl
@@ -63,29 +63,29 @@ linters:
     - gocyclo
     # - gofmt  # Disabled - handled by goimports
     # - goimports  # Disabled - version inconsistencies between local and CI
-    - gomnd
+    # - gomnd  # Deprecated - replaced by mnd
     # - goprintffuncname  # Disabled - function names are clear without 'f' suffix
     # - gosec  # Disabled - govulncheck provides superior security scanning
     - gosimple
     - govet
     - ineffassign
-    - interfacer
+    # - interfacer  # Deprecated - repository archived
     # - lll  # Disabled - some lines legitimately need to be longer
-    - maligned
+    # - maligned  # Deprecated - replaced by govet fieldalignment
     # - misspell  # Disabled - "cancelled" is valid British English spelling
     - nakedret
     # - noctx  # Disabled - http.Client.Post is used appropriately
     - nolintlint
     - rowserrcheck
-    - scopelint
+    # - scopelint  # Deprecated - replaced by exportloopref
     # - staticcheck  # Disabled - flags deprecated but still-functional code
-    - structcheck
+    # - structcheck  # Deprecated - replaced by unused
     # - stylecheck  # Disabled - naming conventions vary by context
     - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
+    # - varcheck  # Deprecated - replaced by unused
     - whitespace
 
   # don't enable:
