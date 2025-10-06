@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	braiinsClient "github.com/sinkers/miner-cli/internal/braiins/client"
 	"github.com/sinkers/miner-cli/internal/client"
 	"github.com/sinkers/miner-cli/internal/iprange"
 	"github.com/sinkers/miner-cli/internal/output"
+	"github.com/sinkers/miner-cli/internal/snmp"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +30,14 @@ var (
 	poolUser  string
 	poolPass  string
 	customCmd string
+
+	// SNMP switch integration
+	switchIP        string
+	switchCommunity string
+
+	// Braiins authentication for MAC address retrieval
+	braiinsUsername string
+	braiinsPassword string
 )
 
 const Version = "1.0.0"
@@ -144,6 +154,10 @@ func init() {
 
 	// Flag to optionally fetch chip temperatures via a second pass
 	scanCmd.Flags().Bool("scan-temps", false, "Fetch chip temperature via device metrics (slower)")
+	scanCmd.Flags().StringVar(&switchIP, "switch", "", "Switch IP address for SNMP port lookup (e.g., 10.110.101.6)")
+	scanCmd.Flags().StringVar(&switchCommunity, "community", "public", "SNMP community string for switch")
+	scanCmd.Flags().StringVar(&braiinsUsername, "braiins-user", "root", "Braiins OS username for MAC address retrieval")
+	scanCmd.Flags().StringVar(&braiinsPassword, "braiins-pass", "root", "Braiins OS password for MAC address retrieval")
 	rootCmd.AddCommand(scanCmd)
 }
 
@@ -260,6 +274,26 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Query switch for MAC address to port mapping if --switch is provided
+	var portMap *snmp.PortMACMap
+	var arpCache *snmp.ARPCache
+	if switchIP != "" {
+		if outputFormat != "json" {
+			fmt.Printf("Querying switch %s for port mappings...\n", switchIP)
+		}
+		switchClient := snmp.NewSwitchClient(switchIP, switchCommunity)
+		var err error
+		portMap, err = switchClient.GetMACAddressTable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to query switch: %v\n", err)
+		} else if outputFormat != "json" {
+			fmt.Printf("Retrieved %d MAC-to-port mappings from switch\n", portMap.Size())
+		}
+
+		// Initialize ARP cache for MAC address lookups
+		arpCache = snmp.NewARPCache()
+	}
+
 	// Enrich with chip temperature (always enabled now)
 	// Build list of active IPs with their firmware info
 	activeIPs := make([]string, 0, len(results))
@@ -277,6 +311,28 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// Get MAC addresses for active miners if we need port lookups
+	macAddresses := make(map[string]string) // IP -> MAC address
+	if arpCache != nil && len(activeIPs) > 0 {
+		if outputFormat != "json" {
+			fmt.Printf("Resolving MAC addresses for %d active miners...\n", len(activeIPs))
+		}
+
+		// First, ping all miners to populate ARP cache
+		// This is done in parallel to speed things up
+		for _, ip := range activeIPs {
+			go snmp.Ping(ip) // Fire and forget - we just want to populate ARP
+		}
+
+		// Give pings a moment to complete
+		time.Sleep(500 * time.Millisecond)
+
+		macAddresses = arpCache.BulkGetMACs(activeIPs)
+		if outputFormat != "json" {
+			fmt.Printf("Resolved %d MAC addresses via ARP\n", len(macAddresses))
+		}
+	}
 	if len(activeIPs) > 0 {
 		temps := make(map[string]float64)
 
@@ -291,7 +347,7 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Fetch stats from Braiins GraphQL API
+		// Fetch stats from Braiins GraphQL API and MAC addresses via gRPC if needed
 		braiinsStats := make(map[string]BraiinsStats)
 		if len(braiiinsIPs) > 0 {
 			for _, ip := range braiiinsIPs {
@@ -299,6 +355,15 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 					braiinsStats[ip] = stats
 					if stats.ChipTemp > 0 {
 						temps[ip] = stats.ChipTemp
+					}
+				}
+
+				// Get MAC address from Braiins miner if we're doing port lookup and don't have it yet
+				if arpCache != nil {
+					if _, hasMac := macAddresses[ip]; !hasMac {
+						if mac, ok := getBraaiinsMACAddress(ip, braiinsUsername, braiinsPassword); ok && mac != "" {
+							macAddresses[ip] = mac
+						}
 					}
 				}
 			}
@@ -337,7 +402,7 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Merge into main results by adding chip_temp_c, power, and tuning data into the Response map
+		// Merge into main results by adding chip_temp_c, power, tuning, and port data into the Response map
 		for i := range results {
 			// Add temperature data
 			if t, ok := temps[results[i].IP]; ok {
@@ -378,6 +443,28 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 							m["tuning"] = stats.Tuning
 							m["tuner_status"] = stats.TunerStatus
 							results[i].Response = m
+						}
+					}
+				}
+			}
+
+			// Add switch port information if available
+			if portMap != nil && results[i].Error == "" {
+				if mac, ok := macAddresses[results[i].IP]; ok && mac != "" {
+					if port, found := portMap.Get(mac); found {
+						switch resp := results[i].Response.(type) {
+						case map[string]interface{}:
+							resp["switch_port"] = port
+							results[i].Response = resp
+						default:
+							b, err := json.Marshal(results[i].Response)
+							if err == nil {
+								var m map[string]interface{}
+								if json.Unmarshal(b, &m) == nil {
+									m["switch_port"] = port
+									results[i].Response = m
+								}
+							}
 						}
 					}
 				}
@@ -635,4 +722,27 @@ func getBraiinsStats(ip string) (BraiinsStats, bool) {
 	stats.Tuning = (status == "TUNING" || status == "TESTING")
 
 	return stats, true
+}
+
+// getBraaiinsMACAddress retrieves MAC address from Braiins miner via gRPC
+func getBraaiinsMACAddress(ip, username, password string) (string, bool) {
+	client, err := braiinsClient.NewSimpleClient(braiinsClient.SimpleClientOptions{
+		Host:     ip,
+		Port:     50051,
+		Username: username,
+		Password: password,
+		Timeout:  2 * time.Second,
+		UseTLS:   false,
+	})
+	if err != nil {
+		return "", false
+	}
+	defer client.Close()
+
+	networkInfo, err := client.GetNetworkInfo()
+	if err != nil {
+		return "", false
+	}
+
+	return networkInfo.GetMacAddress(), networkInfo.GetMacAddress() != ""
 }

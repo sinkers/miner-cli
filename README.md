@@ -34,12 +34,32 @@ miner-cli scan 10.45.9.0/24
 
 **Output includes:**
 - IP address and firmware version (e.g., Braiins OS+ 25.01, Braiins OS+ 25.07)
+- Switch port (when `--switch` flag is used)
 - Real-time hashrate (GH/s)
 - Power consumption (kW) - for Braiins OS miners
 - Chip temperature (°C)
 - Autotuner status (STABLE, TUNING, TESTING)
 - Share statistics (Accepted, Rejected, HW Errors)
 - Uptime
+
+### Switch Port Mapping
+
+Integrate with Cisco switches via SNMP to show which port each miner is connected to:
+
+```bash
+miner-cli scan 192.168.1.0/24 --switch 10.110.101.6 --community public
+```
+
+**Features:**
+- Queries switch MAC address table via SNMP v2c
+- Matches miner MAC addresses to switch ports
+- Works with same-subnet deployments (ARP-based)
+- For Braiins OS miners on different subnets, use gRPC authentication:
+  ```bash
+  miner-cli scan 10.45.6.0/24 --switch 10.110.101.6 --braiins-user root --braiins-pass root
+  ```
+- Displays port names (e.g., FastEthernet0/17, GigabitEthernet1/0/24)
+- Supports Cisco VLAN-aware MAC lookup
 
 ### IP Range Support
 
@@ -96,6 +116,12 @@ miner-cli scan 10.0.0.0/20 -v
 
 # JSON output for automation
 miner-cli scan 192.168.1.0/24 -o json
+
+# Scan with switch port mapping (requires SNMP access to switch)
+miner-cli scan 192.168.1.0/24 --switch 10.110.101.6 --community public
+
+# With Braiins authentication for MAC address retrieval
+miner-cli scan 192.168.1.0/24 --switch 10.110.101.6 --braiins-user root --braiins-pass root
 ```
 
 ### Get Mining Summary

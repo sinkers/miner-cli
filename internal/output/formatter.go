@@ -412,32 +412,70 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	// Create tabwriter
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
-	// Print header
-	fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
-	fmt.Fprintln(w, "---\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+	// Check if any result has switch_port data to determine whether to show port column
+	hasPortData := false
+	for _, result := range results {
+		if result.Error == "" && result.Response != nil {
+			if jsonBytes, err := json.Marshal(result.Response); err == nil {
+				var respMap map[string]interface{}
+				if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+					if _, ok := respMap["switch_port"]; ok {
+						hasPortData = true
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Print header (with or without port column)
+	if hasPortData {
+		fmt.Fprintln(w, "IP\tPort\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
+		fmt.Fprintln(w, "---\t----\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+	} else {
+		fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
+		fmt.Fprintln(w, "---\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+	}
 
 	for _, result := range results {
 		// Skip failed results unless verbose
 		if result.Error != "" {
 			if f.Verbose {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					result.IP,
-					"-",
-					"offline",
-					"-",
-					"-",
-					"-",
-					"-",
-					"-",
-					"-",
-					"-",
-				)
+				if hasPortData {
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						result.IP,
+						"-",
+						"-",
+						"offline",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+					)
+				} else {
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						result.IP,
+						"-",
+						"offline",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+					)
+				}
 			}
 			continue
 		}
 
 		// Extract summary data
 		firmware := "-"
+		switchPort := "-"
 		hashrate := "-"
 		powerKW := "-"
 		chipTemp := "-"
@@ -454,6 +492,10 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 				// Get firmware info
 				if val, ok := respMap["firmware"]; ok {
 					firmware = fmt.Sprintf("%v", val)
+				}
+				// Get switch port info
+				if val, ok := respMap["switch_port"]; ok {
+					switchPort = fmt.Sprintf("%v", val)
 				}
 				// Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
 				if val, ok := respMap["MHS 5s"]; ok {
@@ -522,18 +564,34 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			}
 		}
 
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			result.IP,
-			firmware,
-			hashrate,
-			powerKW,
-			chipTemp,
-			tuning,
-			accepted,
-			rejected,
-			hwErrors,
-			uptime,
-		)
+		if hasPortData {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				result.IP,
+				switchPort,
+				firmware,
+				hashrate,
+				powerKW,
+				chipTemp,
+				tuning,
+				accepted,
+				rejected,
+				hwErrors,
+				uptime,
+			)
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				result.IP,
+				firmware,
+				hashrate,
+				powerKW,
+				chipTemp,
+				tuning,
+				accepted,
+				rejected,
+				hwErrors,
+				uptime,
+			)
+		}
 	}
 
 	w.Flush()

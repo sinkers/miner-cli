@@ -265,3 +265,11 @@ func (c *SimpleBraiinsClient) GetMinerConfiguration() (*pb.GetMinerConfiguration
 	defer cancel()
 	return client.GetMinerConfiguration(ctx, &pb.GetMinerConfigurationRequest{})
 }
+
+// GetNetworkInfo retrieves network information including MAC address
+func (c *SimpleBraiinsClient) GetNetworkInfo() (*pb.GetNetworkInfoResponse, error) {
+	client := pb.NewNetworkServiceClient(c.conn)
+	ctx, cancel := c.getContext()
+	defer cancel()
+	return client.GetNetworkInfo(ctx, &pb.GetNetworkInfoRequest{})
+}
