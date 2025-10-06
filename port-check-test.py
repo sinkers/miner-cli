@@ -18,6 +18,9 @@ SNMP_VERSION = '2c'  # SNMP version
 IF_NAME_OID = '1.3.6.1.2.1.31.1.1.1.1'  # ifName - standard interface name
 IF_DESCR_OID = '1.3.6.1.2.1.2.2.1.2'    # ifDescr - interface description (fallback)
 
+# OID for interface operational status (ifOperStatus from IF-MIB)
+IF_OPER_STATUS_OID = '1.3.6.1.2.1.2.2.1.8'  # 1=up, 2=down, 3=testing
+
 # OID for MAC address table (dot1dTpFdbPort from BRIDGE-MIB)
 MAC_FDB_PORT_OID = '1.3.6.1.2.1.17.4.3.1.2'  # dot1dTpFdbPort - bridge port for each MAC
 # OID for bridge port to interface mapping (dot1dBasePortIfIndex)
@@ -138,9 +141,9 @@ def get_vlans(target_ip, community):
         return ['1', '101', '103']
 
 
-def get_mac_addresses(target_ip, community, vlans):
+def get_mac_addresses_and_mappings(target_ip, community, vlans):
     """
-    Query SNMP to get MAC address table from the switch
+    Query SNMP to get MAC address table and bridge port mappings per VLAN
     For Cisco switches, must query per-VLAN using community@vlan syntax
 
     Args:
@@ -149,17 +152,49 @@ def get_mac_addresses(target_ip, community, vlans):
         vlans: List of VLAN IDs to query
 
     Returns:
-        Dict mapping bridge port to list of (MAC address, VLAN) tuples
+        Tuple of (if_index_to_macs dict, bridge_maps dict)
+        - if_index_to_macs: Maps interface index to list of (MAC, VLAN) tuples
+        - bridge_maps: Maps VLAN to bridge_port->if_index mapping (for debugging)
     """
-    mac_table = defaultdict(list)
+    if_index_to_macs = defaultdict(list)
+    bridge_maps = {}
 
     for vlan in vlans:
         try:
             # Cisco-specific: append VLAN to community string
             vlan_community = f"{community}@{vlan}"
 
-            # Get MAC address forwarding database
-            cmd = [
+            # Get bridge port to interface mapping for this VLAN
+            cmd_bridge = [
+                'snmpwalk',
+                '-v', SNMP_VERSION,
+                '-c', vlan_community,
+                target_ip,
+                BRIDGE_PORT_IF_INDEX_OID
+            ]
+
+            result_bridge = subprocess.run(
+                cmd_bridge,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            bridge_map = {}
+            if result_bridge.returncode == 0:
+                for line in result_bridge.stdout.strip().split('\n'):
+                    if not line or 'No Such' in line:
+                        continue
+                    match = re.search(r'\.(\d+)\s*=\s*(?:INTEGER:\s*)?(\d+)', line)
+                    if match:
+                        bridge_port = match.group(1)
+                        if_index = match.group(2)
+                        bridge_map[bridge_port] = if_index
+
+            bridge_maps[vlan] = bridge_map
+
+            # Get MAC address forwarding database for this VLAN
+            cmd_mac = [
                 'snmpwalk',
                 '-v', SNMP_VERSION,
                 '-c', vlan_community,
@@ -167,31 +202,32 @@ def get_mac_addresses(target_ip, community, vlans):
                 MAC_FDB_PORT_OID
             ]
 
-            result = subprocess.run(
-                cmd,
+            result_mac = subprocess.run(
+                cmd_mac,
                 capture_output=True,
                 text=True,
                 timeout=10
             )
 
-            if result.returncode != 0:
+            if result_mac.returncode != 0:
                 continue
 
-            # Parse output
-            # Format: BRIDGE-MIB::dot1dTpFdbPort.0.12.144.12.34.56 = INTEGER: 23
-            # The MAC address is encoded in the OID itself
-            for line in result.stdout.strip().split('\n'):
+            # Parse MAC table output
+            for line in result_mac.stdout.strip().split('\n'):
                 if not line or 'No Such' in line:
                     continue
 
                 # Extract MAC from OID and bridge port number
-                # OID format: ...17.4.3.1.2.MAC_OCTETS = INTEGER: BRIDGE_PORT
                 match = re.search(r'\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\s*=\s*(?:INTEGER:\s*)?(\d+)', line)
                 if match:
                     mac_octets = [int(match.group(i)) for i in range(1, 7)]
                     mac_address = ':'.join(f'{octet:02x}' for octet in mac_octets)
                     bridge_port = match.group(7)
-                    mac_table[bridge_port].append((mac_address, vlan))
+
+                    # Map bridge port to interface index using VLAN-specific mapping
+                    if_index = bridge_map.get(bridge_port)
+                    if if_index:
+                        if_index_to_macs[if_index].append((mac_address, vlan))
 
         except subprocess.TimeoutExpired:
             print(f"Timeout querying VLAN {vlan}", file=sys.stderr)
@@ -200,21 +236,21 @@ def get_mac_addresses(target_ip, community, vlans):
             print(f"Exception querying VLAN {vlan}: {e}", file=sys.stderr)
             continue
 
-    return dict(mac_table)
+    return dict(if_index_to_macs), bridge_maps
 
 
-def get_bridge_port_mapping(target_ip, community):
+def get_interface_status(target_ip, community):
     """
-    Query SNMP to get bridge port to interface index mapping
+    Query SNMP to get interface operational status
 
     Args:
         target_ip: IP address of the switch
         community: SNMP community string
 
     Returns:
-        Dict mapping bridge port to interface index
+        Dict mapping interface index to status (1=up, 2=down)
     """
-    bridge_map = {}
+    status_map = {}
 
     try:
         cmd = [
@@ -222,7 +258,7 @@ def get_bridge_port_mapping(target_ip, community):
             '-v', SNMP_VERSION,
             '-c', community,
             target_ip,
-            BRIDGE_PORT_IF_INDEX_OID
+            IF_OPER_STATUS_OID
         ]
 
         result = subprocess.run(
@@ -233,31 +269,43 @@ def get_bridge_port_mapping(target_ip, community):
         )
 
         if result.returncode != 0:
-            print(f"snmpwalk bridge port mapping failed: {result.stderr}", file=sys.stderr)
+            print(f"snmpwalk interface status failed: {result.stderr}", file=sys.stderr)
             return {}
 
         # Parse output
-        # Format: BRIDGE-MIB::dot1dBasePortIfIndex.23 = INTEGER: 10023
+        # Format: IF-MIB::ifOperStatus.10001 = INTEGER: up(1)
         for line in result.stdout.strip().split('\n'):
             if not line:
                 continue
 
-            match = re.search(r'\.(\d+)\s*=\s*(?:INTEGER:\s*)?(\d+)', line)
-            if match:
-                bridge_port = match.group(1)
-                if_index = match.group(2)
-                bridge_map[bridge_port] = if_index
+            match = re.search(r'\.(\d+)\s*=\s*INTEGER:\s*\w+\((\d+)\)', line)
+            if not match:
+                # Try alternate format without name
+                match = re.search(r'\.(\d+)\s*=\s*INTEGER:\s*(\d+)', line)
 
-        return bridge_map
+            if match:
+                if_index = match.group(1)
+                status = int(match.group(2))
+                status_map[if_index] = status
+
+        return status_map
 
     except subprocess.TimeoutExpired:
-        print(f"Timeout querying bridge port mapping from {target_ip}", file=sys.stderr)
+        print(f"Timeout querying interface status from {target_ip}", file=sys.stderr)
         return {}
     except Exception as e:
-        print(f"Exception occurred getting bridge port mapping: {e}", file=sys.stderr)
+        print(f"Exception occurred getting interface status: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         return {}
+
+
+def is_physical_port(if_name):
+    """Check if interface is a physical port (not VLAN or Port-channel)"""
+    if_name = if_name.lower()
+    # Physical ports start with Fa, Gi, Te, etc.
+    # Exclude VLANs (Vl), Port-channels (Po), and Null (Nu)
+    return not (if_name.startswith('vl') or if_name.startswith('po') or if_name.startswith('nu'))
 
 
 def main():
@@ -282,45 +330,44 @@ def main():
         print("  4. Network firewall allows SNMP (UDP port 161)")
         return 1
 
+    print("Querying interface status...")
+    status_map = get_interface_status(SWITCH_IP, SNMP_COMMUNITY)
+
     print("Querying VLANs...")
     vlans = get_vlans(SWITCH_IP, SNMP_COMMUNITY)
     print(f"Found VLANs: {', '.join(vlans)}")
 
-    print("Querying MAC address table...")
-    mac_table = get_mac_addresses(SWITCH_IP, SNMP_COMMUNITY, vlans)
+    print("Querying MAC address table and port mappings per VLAN...")
+    if_index_to_macs, bridge_maps = get_mac_addresses_and_mappings(SWITCH_IP, SNMP_COMMUNITY, vlans)
 
-    print("Querying bridge port mappings...")
-    bridge_map = get_bridge_port_mapping(SWITCH_IP, SNMP_COMMUNITY)
-
-    # Map MAC addresses to interface indices
-    if_index_to_macs = defaultdict(list)
-    for bridge_port, mac_vlan_list in mac_table.items():
-        if_index = bridge_map.get(bridge_port)
-        if if_index:
-            if_index_to_macs[if_index].extend(mac_vlan_list)
+    # Filter to physical ports that are UP
+    physical_up_ports = []
+    for if_index, if_name in interfaces:
+        if is_physical_port(if_name) and status_map.get(if_index) == 1:
+            physical_up_ports.append((if_index, if_name))
 
     # Display results
-    print(f"\nFound {len(interfaces)} interface(s):\n")
-    print(f"{'Index':<8} {'Interface':<15} {'MAC Address':<20} {'VLAN'}")
+    print(f"\nPhysical ports that are UP: {len(physical_up_ports)}\n")
+    print(f"{'Interface':<18} {'Status':<10} {'MAC Address':<20} {'VLAN'}")
     print("-" * 80)
 
-    for if_index, if_name in sorted(interfaces, key=lambda x: int(x[0])):
+    for if_index, if_name in sorted(physical_up_ports, key=lambda x: int(x[0])):
         mac_vlan_list = if_index_to_macs.get(if_index, [])
         if mac_vlan_list:
             # Print first MAC on same line as interface
             mac, vlan = mac_vlan_list[0]
-            print(f"{if_index:<8} {if_name:<15} {mac:<20} {vlan}")
+            print(f"{if_name:<18} {'UP':<10} {mac:<20} {vlan}")
             # Print additional MACs indented
             for mac, vlan in mac_vlan_list[1:]:
-                print(f"{'':<24} {mac:<20} {vlan}")
+                print(f"{'':<28} {mac:<20} {vlan}")
         else:
-            print(f"{if_index:<8} {if_name:<15} (no MACs)")
+            print(f"{if_name:<18} {'UP':<10} (no MACs)")
 
     # Summary
-    total_macs = sum(len(macs) for macs in if_index_to_macs.values())
-    ports_with_macs = sum(1 for macs in if_index_to_macs.values() if macs)
-    print(f"\nTotal MAC addresses: {total_macs}")
-    print(f"Ports with MACs: {ports_with_macs}/{len(interfaces)}")
+    total_macs = sum(len(if_index_to_macs.get(idx, [])) for idx, _ in physical_up_ports)
+    ports_with_macs = sum(1 for idx, _ in physical_up_ports if if_index_to_macs.get(idx))
+    print(f"\nTotal MAC addresses on UP physical ports: {total_macs}")
+    print(f"UP ports with MACs: {ports_with_macs}/{len(physical_up_ports)}")
 
     return 0
 

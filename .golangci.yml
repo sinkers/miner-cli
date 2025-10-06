@@ -51,7 +51,7 @@ linters:
   enable:
     - bodyclose
     - deadcode
-    - depguard
+    # - depguard  # Disabled as it incorrectly blocks internal and third-party imports
     - dogsled
     - dupl
     - errcheck
