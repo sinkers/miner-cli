@@ -422,9 +422,9 @@ func TestAPIKeyOperations(t *testing.T) {
 					CreatedAt: time.Now().Add(-48 * time.Hour),
 				},
 			}
-			
+
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}))
 		defer server.Close()
 
@@ -464,9 +464,9 @@ func TestAPIKeyOperations(t *testing.T) {
 				},
 				Key: "generated-api-key-123",
 			}
-			
+
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}))
 		defer server.Close()
 
@@ -493,7 +493,7 @@ func TestAPIKeyOperations(t *testing.T) {
 			}
 
 			var req models.DeleteApikeyQuery
-			json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewDecoder(r.Body).Decode(&req)
 			
 			if req.ID != "key-to-delete" {
 				t.Errorf("expected key ID 'key-to-delete', got %s", req.ID)
@@ -557,9 +557,9 @@ func TestSettingsOperations(t *testing.T) {
 					DNS2:      "8.8.4.4",
 				},
 			}
-			
+
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}))
 		defer server.Close()
 
@@ -592,7 +592,7 @@ func TestSettingsOperations(t *testing.T) {
 			}
 
 			var settings models.Settings
-			json.NewDecoder(r.Body).Decode(&settings)
+			_ = json.NewDecoder(r.Body).Decode(&settings)
 			
 			if settings.Fan.Mode != "manual" {
 				t.Errorf("expected fan mode 'manual', got %s", settings.Fan.Mode)
@@ -625,7 +625,7 @@ func TestContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(2 * time.Second)
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(models.SystemInfo{})
+		_ = json.NewEncoder(w).Encode(models.SystemInfo{})
 	}))
 	defer server.Close()
 
