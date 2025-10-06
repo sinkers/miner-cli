@@ -30,7 +30,10 @@
       "Bash(pip install:*)",
       "Bash(pip uninstall:*)",
       "Bash(snmpwalk:*)",
-      "Read(//dev/**)"
+      "Read(//dev/**)",
+      "Bash(goimports:*)",
+      "Bash(go install:*)",
+      "Bash(~/go/bin/goimports -w cmd/root.go cmd/test-braiins/main.go internal/braiins/models/simple_models.go)"
     ],
     "deny": [],
     "ask": []

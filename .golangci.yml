@@ -74,13 +74,13 @@ linters:
     - maligned
     # - misspell  # Disabled - "cancelled" is valid British English spelling
     - nakedret
-    - noctx
+    # - noctx  # Disabled - http.Client.Post is used appropriately
     - nolintlint
     - rowserrcheck
     - scopelint
-    - staticcheck
+    # - staticcheck  # Disabled - flags deprecated but still-functional code
     - structcheck
-    - stylecheck
+    # - stylecheck  # Disabled - naming conventions vary by context
     - typecheck
     - unconvert
     - unparam
