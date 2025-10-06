@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package client
@@ -51,7 +52,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetInfo failed: %v", err)
 		}
 		t.Logf("System info: %+v", info)
-		
+
 		if info.Hostname == "" {
 			t.Error("expected non-empty hostname")
 		}
@@ -69,7 +70,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetModel failed: %v", err)
 		}
 		t.Logf("Model info: %+v", model)
-		
+
 		if model.Manufacturer == "" {
 			t.Error("expected non-empty manufacturer")
 		}
@@ -84,7 +85,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetStatus failed: %v", err)
 		}
 		t.Logf("Status: %+v", status)
-		
+
 		// Verify we got meaningful data
 		if status.System.Hostname == "" {
 			t.Error("expected non-empty hostname in status")
@@ -97,7 +98,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetSummary failed: %v", err)
 		}
 		t.Logf("Summary: %+v", summary)
-		
+
 		// Check for reasonable values
 		if summary.Performance.HashRate < 0 {
 			t.Error("expected non-negative hash rate")
@@ -113,7 +114,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetPerfSummary failed: %v", err)
 		}
 		t.Logf("Performance: %+v", perf)
-		
+
 		if perf.HashRate < 0 {
 			t.Error("expected non-negative hash rate")
 		}
@@ -128,7 +129,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetChains failed: %v", err)
 		}
 		t.Logf("Found %d chains", len(chains))
-		
+
 		for i, chain := range chains {
 			t.Logf("Chain %d: %+v", i, chain)
 			if chain.ChipCount <= 0 {
@@ -143,7 +144,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetLayout failed: %v", err)
 		}
 		t.Logf("Layout: %+v", layout)
-		
+
 		if layout.Chains <= 0 {
 			t.Error("expected positive number of chains")
 		}
@@ -158,7 +159,7 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetSettings failed: %v", err)
 		}
 		t.Logf("Settings: %+v", settings)
-		
+
 		if len(settings.Pools) == 0 {
 			t.Error("expected at least one pool in settings")
 		}
@@ -180,9 +181,9 @@ func TestIntegration(t *testing.T) {
 			t.Fatalf("GetAutotunePresets failed: %v", err)
 		}
 		t.Logf("Found %d autotune presets", len(presets.Presets))
-		
+
 		for _, preset := range presets.Presets {
-			t.Logf("Preset: %s - %s (%.2f TH/s, %.2f W)", 
+			t.Logf("Preset: %s - %s (%.2f TH/s, %.2f W)",
 				preset.ID, preset.Name, preset.HashRate, preset.Power)
 		}
 	})
@@ -200,7 +201,7 @@ func TestIntegration(t *testing.T) {
 			return
 		}
 		t.Logf("Found %d API keys", len(keys))
-		
+
 		// Try to add a test key
 		testKeyName := "test-key-" + time.Now().Format("20060102-150405")
 		result, err := client.AddAPIKey(ctx, testKeyName)
@@ -208,10 +209,10 @@ func TestIntegration(t *testing.T) {
 			t.Logf("AddAPIKey failed (might need permissions): %v", err)
 			return
 		}
-		
+
 		if result.Status.Success {
 			t.Logf("Created test API key: %s", testKeyName)
-			
+
 			// Clean up - find and delete the test key
 			keys, err = client.GetAPIKeys(ctx)
 			if err == nil {
@@ -233,7 +234,7 @@ func TestIntegration(t *testing.T) {
 	// Test log operations
 	t.Run("LogOperations", func(t *testing.T) {
 		logTypes := []string{"system", "miner", "error"}
-		
+
 		for _, logType := range logTypes {
 			t.Run(logType, func(t *testing.T) {
 				logs, err := client.GetLogs(ctx, logType)
@@ -242,7 +243,7 @@ func TestIntegration(t *testing.T) {
 					return
 				}
 				t.Logf("Retrieved %d %s log entries", len(logs), logType)
-				
+
 				// Show a sample if available
 				if len(logs) > 0 {
 					t.Logf("Latest %s log: %+v", logType, logs[0])
@@ -260,7 +261,7 @@ func TestIntegration(t *testing.T) {
 			return
 		}
 		t.Logf("Found %d notes", len(notes))
-		
+
 		// Create a test note
 		testContent := "Integration test note - " + time.Now().Format(time.RFC3339)
 		note, err := client.CreateNote(ctx, testContent)
@@ -269,7 +270,7 @@ func TestIntegration(t *testing.T) {
 			return
 		}
 		t.Logf("Created note: %s", note.ID)
-		
+
 		// Get the specific note
 		retrieved, err := client.GetNote(ctx, note.ID)
 		if err != nil {
@@ -277,7 +278,7 @@ func TestIntegration(t *testing.T) {
 		} else if retrieved.Content != testContent {
 			t.Errorf("Note content mismatch: expected %s, got %s", testContent, retrieved.Content)
 		}
-		
+
 		// Update the note
 		updatedContent := "Updated: " + testContent
 		updated, err := client.UpdateNote(ctx, note.ID, updatedContent)
@@ -286,7 +287,7 @@ func TestIntegration(t *testing.T) {
 		} else {
 			t.Logf("Updated note content: %s", updated.Content)
 		}
-		
+
 		// Delete the test note
 		err = client.DeleteNote(ctx, note.ID)
 		if err != nil {

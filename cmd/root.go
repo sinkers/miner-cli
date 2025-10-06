@@ -1,19 +1,20 @@
 package cmd
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "net/http"
-    "os"
-    "strconv"
-    "strings"
-    "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
-    "github.com/spf13/cobra"
-    "github.com/sinkers/miner-cli/internal/client"
-    "github.com/sinkers/miner-cli/internal/iprange"
-    "github.com/sinkers/miner-cli/internal/output"
+	braiinsClient "github.com/sinkers/miner-cli/internal/braiins/client"
+	"github.com/sinkers/miner-cli/internal/client"
+	"github.com/sinkers/miner-cli/internal/iprange"
+	"github.com/sinkers/miner-cli/internal/output"
+	"github.com/sinkers/miner-cli/internal/snmp"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -23,20 +24,26 @@ var (
 	workers      int
 	outputFormat string
 	verbose      bool
-	version      bool
 
-	poolID     int
-	poolURL    string
-	poolUser   string
-	poolPass   string
-	deviceName string
-	zeroWhich  string
-	zeroAll    bool
-	customCmd  string
-	customArgs string
+	poolID    int
+	poolURL   string
+	poolUser  string
+	poolPass  string
+	customCmd string
+
+	// SNMP switch integration
+	switchIP        string
+	switchCommunity string
+
+	// Braiins authentication for MAC address retrieval
+	braiinsUsername string
+	braiinsPassword string
 )
 
-const Version = "1.0.0"
+const (
+	Version          = "1.0.0"
+	outputFormatJSON = "json"
+)
 
 var rootCmd = &cobra.Command{
 	Use:     "miner-cli",
@@ -102,17 +109,17 @@ func init() {
 		switch cmdCopy {
 		case "switchpool", "enablepool", "disablepool", "removepool":
 			cobraCmd.Flags().IntVar(&poolID, "pool", 0, "Pool ID")
-			cobraCmd.MarkFlagRequired("pool")
+			_ = cobraCmd.MarkFlagRequired("pool")
 		case "addpool":
 			cobraCmd.Flags().StringVar(&poolURL, "url", "", "Pool URL")
 			cobraCmd.Flags().StringVar(&poolUser, "user", "", "Pool username")
 			cobraCmd.Flags().StringVar(&poolPass, "pass", "", "Pool password")
-			cobraCmd.MarkFlagRequired("url")
-			cobraCmd.MarkFlagRequired("user")
-			cobraCmd.MarkFlagRequired("pass")
+			_ = cobraCmd.MarkFlagRequired("url")
+			_ = cobraCmd.MarkFlagRequired("user")
+			_ = cobraCmd.MarkFlagRequired("pass")
 		case "custom":
 			cobraCmd.Flags().StringVar(&customCmd, "cmd", "", "Custom command to execute")
-			cobraCmd.MarkFlagRequired("cmd")
+			_ = cobraCmd.MarkFlagRequired("cmd")
 		}
 
 		rootCmd.AddCommand(cobraCmd)
@@ -130,27 +137,31 @@ func init() {
 		},
 	})
 
-    // Define scan-specific flags
-    scanCmd := &cobra.Command{
-        Use:   "scan [IP_RANGES...]",
-        Short: "Scan IP ranges to find active miners",
-        Args:  cobra.ArbitraryArgs,
-        PreRunE: func(c *cobra.Command, args []string) error {
-            // Combine positional args with -i flag values
-            if len(args) > 0 {
-                ipRanges = append(ipRanges, args...)
-            }
-            if len(ipRanges) == 0 {
-                return fmt.Errorf("no IP ranges specified")
-            }
-            return nil
-        },
-        RunE: scanMiners,
-    }
+	// Define scan-specific flags
+	scanCmd := &cobra.Command{
+		Use:   "scan [IP_RANGES...]",
+		Short: "Scan IP ranges to find active miners",
+		Args:  cobra.ArbitraryArgs,
+		PreRunE: func(c *cobra.Command, args []string) error {
+			// Combine positional args with -i flag values
+			if len(args) > 0 {
+				ipRanges = append(ipRanges, args...)
+			}
+			if len(ipRanges) == 0 {
+				return fmt.Errorf("no IP ranges specified")
+			}
+			return nil
+		},
+		RunE: scanMiners,
+	}
 
-    // Flag to optionally fetch chip temperatures via a second pass
-    scanCmd.Flags().Bool("scan-temps", false, "Fetch chip temperature via device metrics (slower)")
-    rootCmd.AddCommand(scanCmd)
+	// Flag to optionally fetch chip temperatures via a second pass
+	scanCmd.Flags().Bool("scan-temps", false, "Fetch chip temperature via device metrics (slower)")
+	scanCmd.Flags().StringVar(&switchIP, "switch", "", "Switch IP address for SNMP port lookup (e.g., 10.110.101.6)")
+	scanCmd.Flags().StringVar(&switchCommunity, "community", "public", "SNMP community string for switch")
+	scanCmd.Flags().StringVar(&braiinsUsername, "braiins-user", "root", "Braiins OS username for MAC address retrieval")
+	scanCmd.Flags().StringVar(&braiinsPassword, "braiins-pass", "root", "Braiins OS password for MAC address retrieval")
+	rootCmd.AddCommand(scanCmd)
 }
 
 func executeCommand(command string) error {
@@ -168,7 +179,7 @@ func executeCommand(command string) error {
 		return fmt.Errorf("no valid IPs in specified ranges")
 	}
 
-	if outputFormat != "json" {
+	if outputFormat != outputFormatJSON {
 		fmt.Printf("Executing '%s' on %d hosts...\n", command, len(ips))
 	}
 
@@ -216,182 +227,32 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no valid IPs in specified ranges")
 	}
 
-	if outputFormat != "json" {
+	if outputFormat != outputFormatJSON {
 		fmt.Printf("Scanning %d hosts for active miners...\n", len(ips))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second*time.Duration(len(ips)/workers+1))
 	defer cancel()
 
-    cgClient := client.NewClient(time.Duration(timeout)*time.Second, workers)
-    // Use summary command to get more detailed info including hashrate
-    results := cgClient.ExecuteCommand(ctx, ips, port, "summary", nil)
+	cgClient := client.NewClient(time.Duration(timeout)*time.Second, workers)
+	results := cgClient.ExecuteCommand(ctx, ips, port, "summary", nil)
 
-    // Detect firmware by querying Braiins API for active miners
-    for i := range results {
-        if results[i].Error == "" && results[i].Response != nil {
-            // Try to detect Braiins OS
-            if firmware := getBraaiinsFirmwareInfo(results[i].IP); firmware != "" {
-                // Add firmware info to the response map
-                switch resp := results[i].Response.(type) {
-                case map[string]interface{}:
-                    resp["firmware"] = firmware
-                default:
-                    // Convert to a generic map if needed
-                    b, err := json.Marshal(results[i].Response)
-                    if err == nil {
-                        var m map[string]interface{}
-                        if json.Unmarshal(b, &m) == nil {
-                            m["firmware"] = firmware
-                            results[i].Response = m
-                        }
-                    }
-                }
-            } else {
-                // Default to "Stock" if not Braiins
-                switch resp := results[i].Response.(type) {
-                case map[string]interface{}:
-                    resp["firmware"] = "Stock"
-                default:
-                    b, err := json.Marshal(results[i].Response)
-                    if err == nil {
-                        var m map[string]interface{}
-                        if json.Unmarshal(b, &m) == nil {
-                            m["firmware"] = "Stock"
-                            results[i].Response = m
-                        }
-                    }
-                }
-            }
-        }
-    }
+	// Detect and enrich firmware information
+	enrichFirmwareInfo(results)
 
-    // Enrich with chip temperature (always enabled now)
-    // Build list of active IPs with their firmware info
-    activeIPs := make([]string, 0, len(results))
-    firmwareMap := make(map[string]string)
-    for _, r := range results {
-        if r.Error == "" {
-            activeIPs = append(activeIPs, r.IP)
-            // Extract firmware info
-            if r.Response != nil {
-                if respMap, ok := r.Response.(map[string]interface{}); ok {
-                    if fw, ok := respMap["firmware"].(string); ok {
-                        firmwareMap[r.IP] = fw
-                    }
-                }
-            }
-        }
-    }
-    if len(activeIPs) > 0 {
-        temps := make(map[string]float64)
+	// Setup switch port mapping if requested
+	portMap, arpCache := setupSwitchMapping()
 
-        // Query Braiins API for miners running Braiins OS
-        braiiinsIPs := make([]string, 0)
-        otherIPs := make([]string, 0)
-        for _, ip := range activeIPs {
-            if fw, ok := firmwareMap[ip]; ok && strings.Contains(strings.ToLower(fw), "braiins") {
-                braiiinsIPs = append(braiiinsIPs, ip)
-            } else {
-                otherIPs = append(otherIPs, ip)
-            }
-        }
+	// Build list of active IPs and firmware map
+	activeIPs, firmwareMap := extractActiveMiners(results)
 
-        // Fetch stats from Braiins GraphQL API
-        braiinsStats := make(map[string]BraiinsStats)
-        if len(braiiinsIPs) > 0 {
-            for _, ip := range braiiinsIPs {
-                if stats, ok := getBraiinsStats(ip); ok {
-                    braiinsStats[ip] = stats
-                    if stats.ChipTemp > 0 {
-                        temps[ip] = stats.ChipTemp
-                    }
-                }
-            }
-        }
+	// Resolve MAC addresses if doing port lookups
+	macAddresses := resolveMACAddresses(arpCache, activeIPs)
 
-        // For non-Braiins miners, try devs/stats
-        if len(otherIPs) > 0 {
-            // First attempt via `devs`
-            devResults := cgClient.ExecuteCommand(ctx, otherIPs, port, "devs", nil)
-            for _, dr := range devResults {
-                if dr.Error != "" || dr.Response == nil {
-                    continue
-                }
-                if t, ok := extractChipTempFromDevs(dr.Response); ok {
-                    temps[dr.IP] = t
-                }
-            }
+	// Enrich results with temperature, power, and port data
+	enrichMinerData(ctx, cgClient, results, activeIPs, firmwareMap, macAddresses, portMap, arpCache)
 
-            // Fallback to `stats` for IPs with no temp yet
-            missing := make([]string, 0, len(otherIPs))
-            for _, ip := range otherIPs {
-                if _, ok := temps[ip]; !ok {
-                    missing = append(missing, ip)
-                }
-            }
-            if len(missing) > 0 {
-                statsResults := cgClient.ExecuteCommand(ctx, missing, port, "stats", nil)
-                for _, sr := range statsResults {
-                    if sr.Error != "" || sr.Response == nil {
-                        continue
-                    }
-                    if t, ok := extractChipTempFromStats(sr.Response); ok {
-                        temps[sr.IP] = t
-                    }
-                }
-            }
-        }
-
-        // Merge into main results by adding chip_temp_c, power, and tuning data into the Response map
-        for i := range results {
-            // Add temperature data
-            if t, ok := temps[results[i].IP]; ok {
-                switch resp := results[i].Response.(type) {
-                case map[string]interface{}:
-                    resp["chip_temp_c"] = t
-                    results[i].Response = resp
-                default:
-                    b, err := json.Marshal(results[i].Response)
-                    if err == nil {
-                        var m map[string]interface{}
-                        if json.Unmarshal(b, &m) == nil {
-                            m["chip_temp_c"] = t
-                            results[i].Response = m
-                        }
-                    }
-                }
-            }
-
-            // Add Braiins-specific stats (power and tuning)
-            if stats, ok := braiinsStats[results[i].IP]; ok {
-                switch resp := results[i].Response.(type) {
-                case map[string]interface{}:
-                    if stats.PowerW > 0 {
-                        resp["power_w"] = stats.PowerW
-                    }
-                    resp["tuning"] = stats.Tuning
-                    resp["tuner_status"] = stats.TunerStatus
-                    results[i].Response = resp
-                default:
-                    b, err := json.Marshal(results[i].Response)
-                    if err == nil {
-                        var m map[string]interface{}
-                        if json.Unmarshal(b, &m) == nil {
-                            if stats.PowerW > 0 {
-                                m["power_w"] = stats.PowerW
-                            }
-                            m["tuning"] = stats.Tuning
-                            m["tuner_status"] = stats.TunerStatus
-                            results[i].Response = m
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-	if outputFormat == "json" {
+	if outputFormat == outputFormatJSON {
 		formatter := output.GetFormatter(outputFormat, verbose)
 		return formatter.Format(results)
 	}
@@ -401,248 +262,481 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	return formatter.Format(results)
 }
 
+// enrichFirmwareInfo detects and adds firmware information to results
+func enrichFirmwareInfo(results []client.Result) {
+	for i := range results {
+		if results[i].Error == "" && results[i].Response != nil {
+			firmware := getBraaiinsFirmwareInfo(results[i].IP)
+			if firmware == "" {
+				firmware = "Stock"
+			}
+			addFieldToResponse(&results[i], "firmware", firmware)
+		}
+	}
+}
+
+// setupSwitchMapping initializes switch port mapping if requested
+func setupSwitchMapping() (*snmp.PortMACMap, *snmp.ARPCache) {
+	if switchIP == "" {
+		return nil, nil
+	}
+
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Querying switch %s for port mappings...\n", switchIP)
+	}
+
+	switchClient := snmp.NewSwitchClient(switchIP, switchCommunity)
+	portMap, err := switchClient.GetMACAddressTable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to query switch: %v\n", err)
+		return nil, nil
+	}
+
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Retrieved %d MAC-to-port mappings from switch\n", portMap.Size())
+	}
+
+	return portMap, snmp.NewARPCache()
+}
+
+// extractActiveMiners builds list of active IPs and their firmware info
+func extractActiveMiners(results []client.Result) ([]string, map[string]string) {
+	activeIPs := make([]string, 0, len(results))
+	firmwareMap := make(map[string]string)
+
+	for _, r := range results {
+		if r.Error == "" {
+			activeIPs = append(activeIPs, r.IP)
+			if r.Response != nil {
+				if respMap, ok := r.Response.(map[string]interface{}); ok {
+					if fw, ok := respMap["firmware"].(string); ok {
+						firmwareMap[r.IP] = fw
+					}
+				}
+			}
+		}
+	}
+
+	return activeIPs, firmwareMap
+}
+
+// resolveMACAddresses retrieves MAC addresses for active miners
+func resolveMACAddresses(arpCache *snmp.ARPCache, activeIPs []string) map[string]string {
+	macAddresses := make(map[string]string)
+	if arpCache == nil || len(activeIPs) == 0 {
+		return macAddresses
+	}
+
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Resolving MAC addresses for %d active miners...\n", len(activeIPs))
+	}
+
+	for _, ip := range activeIPs {
+		go func(addr string) {
+			_ = snmp.Ping(addr)
+		}(ip)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	macAddresses = arpCache.BulkGetMACs(activeIPs)
+	if outputFormat != outputFormatJSON {
+		fmt.Printf("Resolved %d MAC addresses via ARP\n", len(macAddresses))
+	}
+
+	return macAddresses
+}
+
+// enrichMinerData adds temperature, power, and port information to results
+func enrichMinerData(ctx context.Context, cgClient *client.Client, results []client.Result,
+	activeIPs []string, firmwareMap map[string]string, macAddresses map[string]string,
+	portMap *snmp.PortMACMap, arpCache *snmp.ARPCache) {
+	if len(activeIPs) == 0 {
+		return
+	}
+
+	temps := make(map[string]float64)
+	braiinsStats := fetchBraiinsData(activeIPs, firmwareMap, temps, macAddresses, arpCache)
+	fetchNonBraiinsTemps(ctx, cgClient, activeIPs, firmwareMap, temps)
+	mergeDataIntoResults(results, temps, braiinsStats, macAddresses, portMap)
+}
+
+// fetchBraiinsData gets temperature and stats from Braiins miners
+func fetchBraiinsData(activeIPs []string, firmwareMap map[string]string, temps map[string]float64,
+	macAddresses map[string]string, arpCache *snmp.ARPCache) map[string]BraiinsStats {
+	braiinsStats := make(map[string]BraiinsStats)
+	for _, ip := range activeIPs {
+		fw, ok := firmwareMap[ip]
+		if !ok || !strings.Contains(strings.ToLower(fw), "braiins") {
+			continue
+		}
+
+		if stats, ok := getBraiinsStats(ip); ok {
+			braiinsStats[ip] = stats
+			if stats.ChipTemp > 0 {
+				temps[ip] = stats.ChipTemp
+			}
+		}
+
+		if arpCache != nil {
+			if _, hasMac := macAddresses[ip]; !hasMac {
+				if mac, ok := getBraaiinsMACAddress(ip, braiinsUsername, braiinsPassword); ok && mac != "" {
+					macAddresses[ip] = mac
+				}
+			}
+		}
+	}
+
+	return braiinsStats
+}
+
+// fetchNonBraiinsTemps gets temperatures from non-Braiins miners
+func fetchNonBraiinsTemps(ctx context.Context, cgClient *client.Client, activeIPs []string,
+	firmwareMap map[string]string, temps map[string]float64) {
+	otherIPs := make([]string, 0)
+	for _, ip := range activeIPs {
+		if fw, ok := firmwareMap[ip]; !ok || !strings.Contains(strings.ToLower(fw), "braiins") {
+			otherIPs = append(otherIPs, ip)
+		}
+	}
+
+	if len(otherIPs) == 0 {
+		return
+	}
+
+	devResults := cgClient.ExecuteCommand(ctx, otherIPs, port, "devs", nil)
+	for _, dr := range devResults {
+		if dr.Error == "" && dr.Response != nil {
+			if t, ok := extractChipTempFromDevs(dr.Response); ok {
+				temps[dr.IP] = t
+			}
+		}
+	}
+
+	missing := make([]string, 0, len(otherIPs))
+	for _, ip := range otherIPs {
+		if _, ok := temps[ip]; !ok {
+			missing = append(missing, ip)
+		}
+	}
+
+	if len(missing) > 0 {
+		statsResults := cgClient.ExecuteCommand(ctx, missing, port, "stats", nil)
+		for _, sr := range statsResults {
+			if sr.Error == "" && sr.Response != nil {
+				if t, ok := extractChipTempFromStats(sr.Response); ok {
+					temps[sr.IP] = t
+				}
+			}
+		}
+	}
+}
+
+// mergeDataIntoResults adds all enrichment data to results
+func mergeDataIntoResults(results []client.Result, temps map[string]float64,
+	braiinsStats map[string]BraiinsStats, macAddresses map[string]string, portMap *snmp.PortMACMap) {
+	for i := range results {
+		if t, ok := temps[results[i].IP]; ok {
+			addFieldToResponse(&results[i], "chip_temp_c", t)
+		}
+
+		if stats, ok := braiinsStats[results[i].IP]; ok {
+			if stats.PowerW > 0 {
+				addFieldToResponse(&results[i], "power_w", stats.PowerW)
+			}
+			addFieldToResponse(&results[i], "tuning", stats.Tuning)
+			addFieldToResponse(&results[i], "tuner_status", stats.TunerStatus)
+		}
+
+		if portMap != nil && results[i].Error == "" {
+			if mac, ok := macAddresses[results[i].IP]; ok && mac != "" {
+				if port, found := portMap.Get(mac); found {
+					addFieldToResponse(&results[i], "switch_port", port)
+				}
+			}
+		}
+	}
+}
+
+// addFieldToResponse adds a field to a result's response, handling type conversion
+func addFieldToResponse(result *client.Result, key string, value interface{}) {
+	switch resp := result.Response.(type) {
+	case map[string]interface{}:
+		resp[key] = value
+		result.Response = resp
+	default:
+		b, err := json.Marshal(result.Response)
+		if err == nil {
+			var m map[string]interface{}
+			if json.Unmarshal(b, &m) == nil {
+				m[key] = value
+				result.Response = m
+			}
+		}
+	}
+}
+
 // extractChipTempFromDevs attempts to extract a representative chip temperature
 // from a CGMiner "devs" response. It returns the maximum temperature observed
 // across devices when available.
 func extractChipTempFromDevs(resp interface{}) (float64, bool) {
-    // Normalize via JSON into a slice of generic maps
-    b, err := json.Marshal(resp)
-    if err != nil {
-        return 0, false
-    }
-    var arr []map[string]interface{}
-    if err := json.Unmarshal(b, &arr); err != nil {
-        // Some implementations may return a single object
-        var m map[string]interface{}
-        if err := json.Unmarshal(b, &m); err != nil {
-            return 0, false
-        }
-        arr = []map[string]interface{}{m}
-    }
+	// Normalize via JSON into a slice of generic maps
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return 0, false
+	}
+	var arr []map[string]interface{}
+	if err := json.Unmarshal(b, &arr); err != nil {
+		// Some implementations may return a single object
+		var m map[string]interface{}
+		if err := json.Unmarshal(b, &m); err != nil {
+			return 0, false
+		}
+		arr = []map[string]interface{}{m}
+	}
 
-    maxT := -1.0
-    for _, dev := range arr {
-        for k, v := range dev {
-            lk := strings.ToLower(k)
-            if strings.Contains(lk, "temp") {
-                // Parse number-like value
-                if t, ok := toFloat64Loose(v); ok {
-                    // Filter out invalid temps
-                    if t > 0 && t <= 200 && t > maxT {
-                        maxT = t
-                    }
-                }
-            }
-        }
-    }
-    if maxT >= 0 {
-        return maxT, true
-    }
-    return 0, false
+	maxT := -1.0
+	for _, dev := range arr {
+		for k, v := range dev {
+			lk := strings.ToLower(k)
+			if strings.Contains(lk, "temp") {
+				// Parse number-like value
+				if t, ok := toFloat64Loose(v); ok {
+					// Filter out invalid temps
+					if t > 0 && t <= 200 && t > maxT {
+						maxT = t
+					}
+				}
+			}
+		}
+	}
+	if maxT >= 0 {
+		return maxT, true
+	}
+	return 0, false
 }
 
 // toFloat64Loose converts common numeric encodings to float64
 func toFloat64Loose(v interface{}) (float64, bool) {
-    switch t := v.(type) {
-    case float64:
-        return t, true
-    case float32:
-        return float64(t), true
-    case int:
-        return float64(t), true
-    case int64:
-        return float64(t), true
-    case json.Number:
-        f, err := t.Float64()
-        return f, err == nil
-    case string:
-        var f float64
-        if _, err := fmt.Sscanf(t, "%f", &f); err == nil {
-            return f, true
-        }
-        return 0, false
-    default:
-        return 0, false
-    }
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case float32:
+		return float64(t), true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case json.Number:
+		f, err := t.Float64()
+		return f, err == nil
+	case string:
+		var f float64
+		if _, err := fmt.Sscanf(t, "%f", &f); err == nil {
+			return f, true
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
 }
 
 // extractChipTempFromStats attempts to extract a representative chip temperature
 // from a CGMiner "stats" response. It scans all temp-like keys and returns
 // the maximum plausible value.
 func extractChipTempFromStats(resp interface{}) (float64, bool) {
-    b, err := json.Marshal(resp)
-    if err != nil {
-        return 0, false
-    }
-    var arr []map[string]interface{}
-    if err := json.Unmarshal(b, &arr); err != nil {
-        // Some implementations may return a single object
-        var m map[string]interface{}
-        if err := json.Unmarshal(b, &m); err != nil {
-            return 0, false
-        }
-        arr = []map[string]interface{}{m}
-    }
-    maxT := -1.0
-    var visit func(map[string]interface{})
-    visit = func(m map[string]interface{}) {
-        for k, v := range m {
-            lk := strings.ToLower(k)
-            if strings.Contains(lk, "temp") {
-                if t, ok := toFloat64Loose(v); ok {
-                    if t > 0 && t <= 200 && t > maxT {
-                        maxT = t
-                    }
-                }
-            }
-            // If nested map, scan recursively
-            if nested, ok := v.(map[string]interface{}); ok {
-                visit(nested)
-            }
-        }
-    }
-    for _, m := range arr {
-        visit(m)
-    }
-    if maxT >= 0 {
-        return maxT, true
-    }
-    return 0, false
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return 0, false
+	}
+	var arr []map[string]interface{}
+	if err := json.Unmarshal(b, &arr); err != nil {
+		// Some implementations may return a single object
+		var m map[string]interface{}
+		if err := json.Unmarshal(b, &m); err != nil {
+			return 0, false
+		}
+		arr = []map[string]interface{}{m}
+	}
+	maxT := -1.0
+	var visit func(map[string]interface{})
+	visit = func(m map[string]interface{}) {
+		for k, v := range m {
+			lk := strings.ToLower(k)
+			if strings.Contains(lk, "temp") {
+				if t, ok := toFloat64Loose(v); ok {
+					if t > 0 && t <= 200 && t > maxT {
+						maxT = t
+					}
+				}
+			}
+			// If nested map, scan recursively
+			if nested, ok := v.(map[string]interface{}); ok {
+				visit(nested)
+			}
+		}
+	}
+	for _, m := range arr {
+		visit(m)
+	}
+	if maxT >= 0 {
+		return maxT, true
+	}
+	return 0, false
 }
 
 // getBraaiinsFirmwareInfo queries the Braiins OS GraphQL API to detect firmware version
 func getBraaiinsFirmwareInfo(ip string) string {
-    client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: 2 * time.Second}
 
-    query := `{"query":"{ bos { info { mode version { full isPlus } } } }"}`
+	query := `{"query":"{ bos { info { mode version { full isPlus } } } }"}`
 
-    resp, err := client.Post(
-        fmt.Sprintf("http://%s/graphql", ip),
-        "application/json",
-        strings.NewReader(query),
-    )
-    if err != nil {
-        return ""
-    }
-    defer resp.Body.Close()
+	resp, err := client.Post(
+		fmt.Sprintf("http://%s/graphql", ip),
+		"application/json",
+		strings.NewReader(query),
+	)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
 
-    var result struct {
-        Data struct {
-            Bos struct {
-                Info struct {
-                    Mode    string `json:"mode"`
-                    Version struct {
-                        Full   string `json:"full"`
-                        IsPlus bool   `json:"isPlus"`
-                    } `json:"version"`
-                } `json:"info"`
-            } `json:"bos"`
-        } `json:"data"`
-    }
+	var result struct {
+		Data struct {
+			Bos struct {
+				Info struct {
+					Mode    string `json:"mode"`
+					Version struct {
+						Full   string `json:"full"`
+						IsPlus bool   `json:"isPlus"`
+					} `json:"version"`
+				} `json:"info"`
+			} `json:"bos"`
+		} `json:"data"`
+	}
 
-    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-        return ""
-    }
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return ""
+	}
 
-    if result.Data.Bos.Info.Version.Full != "" {
-        version := result.Data.Bos.Info.Version.Full
-        // Simplify version string - extract just the version number
-        // Format: "2025-02-21-0-e05df053-25.01-plus" -> "Braiins OS+ 25.01"
-        parts := strings.Split(version, "-")
-        if len(parts) > 0 {
-            // Find the version number (e.g., "25.01")
-            for _, part := range parts {
-                if strings.Contains(part, ".") && len(part) <= 6 {
-                    suffix := ""
-                    if result.Data.Bos.Info.Version.IsPlus {
-                        suffix = "+"
-                    }
-                    return fmt.Sprintf("Braiins OS%s %s", suffix, part)
-                }
-            }
-        }
-        // Fallback to showing if it's Plus or not
-        if result.Data.Bos.Info.Version.IsPlus {
-            return "Braiins OS+"
-        }
-        return "Braiins OS"
-    }
+	if result.Data.Bos.Info.Version.Full != "" {
+		version := result.Data.Bos.Info.Version.Full
+		// Simplify version string - extract just the version number
+		// Format: "2025-02-21-0-e05df053-25.01-plus" -> "Braiins OS+ 25.01"
+		parts := strings.Split(version, "-")
+		if len(parts) > 0 {
+			// Find the version number (e.g., "25.01")
+			for _, part := range parts {
+				if strings.Contains(part, ".") && len(part) <= 6 {
+					suffix := ""
+					if result.Data.Bos.Info.Version.IsPlus {
+						suffix = "+"
+					}
+					return fmt.Sprintf("Braiins OS%s %s", suffix, part)
+				}
+			}
+		}
+		// Fallback to showing if it's Plus or not
+		if result.Data.Bos.Info.Version.IsPlus {
+			return "Braiins OS+"
+		}
+		return "Braiins OS"
+	}
 
-    return ""
+	return ""
 }
 
 // BraiinsStats holds mining statistics from Braiins OS
 type BraiinsStats struct {
-    ChipTemp  float64
-    PowerW    int
-    Tuning    bool
-    TunerStatus string
+	ChipTemp    float64
+	PowerW      int
+	Tuning      bool
+	TunerStatus string
 }
 
 // getBraiinsStats queries the Braiins OS GraphQL API for chip temperature, power, and tuning status
 func getBraiinsStats(ip string) (BraiinsStats, bool) {
-    client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: 2 * time.Second}
 
-    query := `{"query":"{ bosminer { info { workSolver { temperatures { name degreesC } power { approxConsumptionW } tuner { status } } } } }"}`
+	query := `{"query":"{ bosminer { info { workSolver { temperatures { name degreesC } power { approxConsumptionW } tuner { status } } } } }"}`
 
-    resp, err := client.Post(
-        fmt.Sprintf("http://%s/graphql", ip),
-        "application/json",
-        strings.NewReader(query),
-    )
-    if err != nil {
-        return BraiinsStats{}, false
-    }
-    defer resp.Body.Close()
+	resp, err := client.Post(
+		fmt.Sprintf("http://%s/graphql", ip),
+		"application/json",
+		strings.NewReader(query),
+	)
+	if err != nil {
+		return BraiinsStats{}, false
+	}
+	defer resp.Body.Close()
 
-    var result struct {
-        Data struct {
-            Bosminer struct {
-                Info struct {
-                    WorkSolver struct {
-                        Temperatures []struct {
-                            Name     string  `json:"name"`
-                            DegreesC float64 `json:"degreesC"`
-                        } `json:"temperatures"`
-                        Power struct {
-                            ApproxConsumptionW int `json:"approxConsumptionW"`
-                        } `json:"power"`
-                        Tuner struct {
-                            Status string `json:"status"`
-                        } `json:"tuner"`
-                    } `json:"workSolver"`
-                } `json:"info"`
-            } `json:"bosminer"`
-        } `json:"data"`
-    }
+	var result struct {
+		Data struct {
+			Bosminer struct {
+				Info struct {
+					WorkSolver struct {
+						Temperatures []struct {
+							Name     string  `json:"name"`
+							DegreesC float64 `json:"degreesC"`
+						} `json:"temperatures"`
+						Power struct {
+							ApproxConsumptionW int `json:"approxConsumptionW"`
+						} `json:"power"`
+						Tuner struct {
+							Status string `json:"status"`
+						} `json:"tuner"`
+					} `json:"workSolver"`
+				} `json:"info"`
+			} `json:"bosminer"`
+		} `json:"data"`
+	}
 
-    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-        return BraiinsStats{}, false
-    }
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return BraiinsStats{}, false
+	}
 
-    stats := BraiinsStats{}
+	stats := BraiinsStats{}
 
-    // Find the Chip temperature (handle both "chip" and "MAX_CHIP")
-    maxTemp := 0.0
-    for _, temp := range result.Data.Bosminer.Info.WorkSolver.Temperatures {
-        lowerName := strings.ToLower(temp.Name)
-        if (lowerName == "chip" || lowerName == "max_chip") && temp.DegreesC > maxTemp {
-            maxTemp = temp.DegreesC
-        }
-    }
-    stats.ChipTemp = maxTemp
+	// Find the Chip temperature (handle both "chip" and "MAX_CHIP")
+	maxTemp := 0.0
+	for _, temp := range result.Data.Bosminer.Info.WorkSolver.Temperatures {
+		lowerName := strings.ToLower(temp.Name)
+		if (lowerName == "chip" || lowerName == "max_chip") && temp.DegreesC > maxTemp {
+			maxTemp = temp.DegreesC
+		}
+	}
+	stats.ChipTemp = maxTemp
 
-    // Get power consumption
-    stats.PowerW = result.Data.Bosminer.Info.WorkSolver.Power.ApproxConsumptionW
+	// Get power consumption
+	stats.PowerW = result.Data.Bosminer.Info.WorkSolver.Power.ApproxConsumptionW
 
-    // Check tuning status
-    status := strings.ToUpper(result.Data.Bosminer.Info.WorkSolver.Tuner.Status)
-    stats.TunerStatus = status
-    stats.Tuning = (status == "TUNING" || status == "TESTING")
+	// Check tuning status
+	status := strings.ToUpper(result.Data.Bosminer.Info.WorkSolver.Tuner.Status)
+	stats.TunerStatus = status
+	stats.Tuning = (status == "TUNING" || status == "TESTING")
 
-    return stats, true
+	return stats, true
 }
 
-func parseIntParam(param string) (int, error) {
-	return strconv.Atoi(param)
+// getBraaiinsMACAddress retrieves MAC address from Braiins miner via gRPC
+func getBraaiinsMACAddress(ip, username, password string) (string, bool) {
+	client, err := braiinsClient.NewSimpleClient(braiinsClient.SimpleClientOptions{
+		Host:     ip,
+		Port:     50051,
+		Username: username,
+		Password: password,
+		Timeout:  2 * time.Second,
+		UseTLS:   false,
+	})
+	if err != nil {
+		return "", false
+	}
+	defer client.Close()
+
+	networkInfo, err := client.GetNetworkInfo()
+	if err != nil {
+		return "", false
+	}
+
+	return networkInfo.GetMacAddress(), networkInfo.GetMacAddress() != ""
 }

@@ -21,27 +21,27 @@ type SimpleMinerInfo struct {
 
 // SimpleMinerStats represents mining statistics
 type SimpleMinerStats struct {
-	HashRate5s      float64 // TH/s
-	HashRate1m      float64 // TH/s
-	HashRate15m     float64 // TH/s
-	HashRate24h     float64 // TH/s
-	PowerUsage      float64 // Watts
-	Efficiency      float64 // J/TH
-	AcceptedShares  uint64
-	RejectedShares  uint64
-	Temperature     float64 // Celsius average
-	FanSpeeds       []int   // RPM
+	HashRate5s     float64 // TH/s
+	HashRate1m     float64 // TH/s
+	HashRate15m    float64 // TH/s
+	HashRate24h    float64 // TH/s
+	PowerUsage     float64 // Watts
+	Efficiency     float64 // J/TH
+	AcceptedShares uint64
+	RejectedShares uint64
+	Temperature    float64 // Celsius average
+	FanSpeeds      []int   // RPM
 }
 
 // SimpleHashboard represents hashboard information
 type SimpleHashboard struct {
-	Index           int
-	Status          string
-	HashRate        float64 // TH/s
-	Temperature     float64 // Celsius
-	Chips           int
-	Voltage         float64
-	Frequency       float64
+	Index       int
+	Status      string
+	HashRate    float64 // TH/s
+	Temperature float64 // Celsius
+	Chips       int
+	Voltage     float64
+	Frequency   float64
 }
 
 // SimplePool represents pool information

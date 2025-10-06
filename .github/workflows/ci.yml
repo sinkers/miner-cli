@@ -7,7 +7,7 @@ on:
     branches: [ main, develop, vnish ]
 
 env:
-  GO_VERSION: '1.19'
+  GO_VERSION: '1.23'
 
 jobs:
   test:
@@ -166,5 +166,5 @@ jobs:
 
     - name: Run govulncheck
       run: |
-        go install golang.org/x/vuln/cmd/govulncheck@v1.0.4
+        go install golang.org/x/vuln/cmd/govulncheck@latest
         govulncheck ./...

@@ -32,7 +32,7 @@ func (a *VNishAdapter) Connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to VNish: %w", err)
 	}
-	
+
 	a.host = info.Hostname
 	a.connected = true
 	return nil
@@ -109,7 +109,7 @@ func (a *VNishAdapter) GetSummary(ctx context.Context) (*UnifiedSummary, error) 
 		unified.HashRate1m = summary.Performance.HashRate1m
 		unified.HashRate5m = summary.Performance.HashRate5m
 		unified.HashRate15m = summary.Performance.HashRate15m
-		
+
 		// Power and efficiency
 		unified.PowerUsage = summary.Performance.PowerUsage
 		unified.Efficiency = summary.Performance.Efficiency
@@ -242,13 +242,13 @@ func (a *VNishAdapter) GetLogs(ctx context.Context, lines int) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Convert log entries to strings
 	logLines := make([]string, 0, len(logs.Entries))
 	for _, entry := range logs.Entries {
 		logLines = append(logLines, fmt.Sprintf("%s: %s", entry.Timestamp, entry.Message))
 	}
-	
+
 	return logLines, nil
 }
 

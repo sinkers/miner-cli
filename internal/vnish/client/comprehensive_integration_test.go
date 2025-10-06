@@ -1,3 +1,4 @@
+//go:build integration
 // +build integration
 
 package client
@@ -18,24 +19,24 @@ import (
 // Test configuration flags for comprehensive testing
 var (
 	// Connection settings
-	testHost     = flag.String("test.host", "10.45.3.1", "Vnish miner host IP address")
-	testAPIKey   = flag.String("test.apikey", "", "Vnish API key for authentication")
-	testTimeout  = flag.Duration("http.timeout", 10*time.Second, "HTTP request timeout")
-	
+	testHost    = flag.String("test.host", "10.45.3.1", "Vnish miner host IP address")
+	testAPIKey  = flag.String("test.apikey", "", "Vnish API key for authentication")
+	testTimeout = flag.Duration("http.timeout", 10*time.Second, "HTTP request timeout")
+
 	// Skip flags for potentially disruptive tests
-	skipAuthTests     = flag.Bool("skip-auth", false, "Skip authentication tests")
-	skipWriteOps      = flag.Bool("skip-write", true, "Skip write operations (pool changes, settings)")
-	skipReboot        = flag.Bool("skip-reboot", true, "Skip reboot test")
-	skipRestart       = flag.Bool("skip-restart", true, "Skip restart mining test")
-	skipAutotuneOps   = flag.Bool("skip-autotune", true, "Skip autotune operations")
-	skipAPIKeyOps     = flag.Bool("skip-apikey", true, "Skip API key management tests")
-	skipNotesOps      = flag.Bool("skip-notes", false, "Skip notes operations")
-	skipFindMiner     = flag.Bool("skip-find", true, "Skip find miner (LED blink) test")
-	
+	skipAuthTests   = flag.Bool("skip-auth", false, "Skip authentication tests")
+	skipWriteOps    = flag.Bool("skip-write", true, "Skip write operations (pool changes, settings)")
+	skipReboot      = flag.Bool("skip-reboot", true, "Skip reboot test")
+	skipRestart     = flag.Bool("skip-restart", true, "Skip restart mining test")
+	skipAutotuneOps = flag.Bool("skip-autotune", true, "Skip autotune operations")
+	skipAPIKeyOps   = flag.Bool("skip-apikey", true, "Skip API key management tests")
+	skipNotesOps    = flag.Bool("skip-notes", false, "Skip notes operations")
+	skipFindMiner   = flag.Bool("skip-find", true, "Skip find miner (LED blink) test")
+
 	// Test behavior settings
-	verboseOutput     = flag.Bool("verbose", true, "Enable verbose output")
-	waitAfterReboot   = flag.Duration("wait-reboot", 2*time.Minute, "Wait time after reboot")
-	waitAfterRestart  = flag.Duration("wait-restart", 30*time.Second, "Wait time after restart")
+	verboseOutput    = flag.Bool("verbose", true, "Enable verbose output")
+	waitAfterReboot  = flag.Duration("wait-reboot", 2*time.Minute, "Wait time after reboot")
+	waitAfterRestart = flag.Duration("wait-restart", 30*time.Second, "Wait time after restart")
 )
 
 // TestResult tracks individual test results
@@ -73,7 +74,7 @@ func printWarning(format string, args ...interface{}) {
 
 func printInfo(format string, args ...interface{}) {
 	if *verboseOutput {
-		fmt.Printf("  " + format + "\n", args...)
+		fmt.Printf("  "+format+"\n", args...)
 	}
 }
 
@@ -191,14 +192,14 @@ func (s *VnishIntegrationTestSuite) testConnectionAndAuth() {
 		if err != nil {
 			return fmt.Errorf("authentication check failed: %v", err)
 		}
-		
+
 		printInfo("Authenticated: %v", auth.Authenticated)
 		printInfo("Method: %s", auth.Method)
-		
+
 		if !auth.Authenticated {
 			printWarning("Not authenticated - some operations may be restricted")
 		}
-		
+
 		return nil
 	})
 }
@@ -219,14 +220,14 @@ func (s *VnishIntegrationTestSuite) testSystemInformation() {
 		printInfo("Version: %s", info.Version)
 		printInfo("Uptime: %v seconds", info.Uptime)
 		printInfo("Load Average: %v", info.LoadAverage)
-		
+
 		if info.Hostname == "" {
 			return fmt.Errorf("expected non-empty hostname")
 		}
 		if info.Model == "" {
 			return fmt.Errorf("expected non-empty model")
 		}
-		
+
 		return nil
 	})
 
@@ -241,11 +242,11 @@ func (s *VnishIntegrationTestSuite) testSystemInformation() {
 		printInfo("Manufacturer: %s", model.Manufacturer)
 		printInfo("Model: %s", model.Model)
 		printInfo("Description: %s", model.Description)
-		
+
 		if model.Manufacturer == "" {
 			return fmt.Errorf("expected non-empty manufacturer")
 		}
-		
+
 		return nil
 	})
 
@@ -260,11 +261,11 @@ func (s *VnishIntegrationTestSuite) testSystemInformation() {
 		printInfo("Chains: %d", layout.Chains)
 		printInfo("Chips per Chain: %d", layout.Chips)
 		printInfo("Total Chips: %d", layout.Chains*layout.Chips)
-		
+
 		if layout.Chains <= 0 {
 			return fmt.Errorf("expected positive number of chains")
 		}
-		
+
 		return nil
 	})
 }
@@ -284,14 +285,14 @@ func (s *VnishIntegrationTestSuite) testPerformanceMetrics() {
 		printInfo("  Hostname: %s", status.System.Hostname)
 		printInfo("  Version: %s", status.System.Version)
 		printInfo("  Uptime: %v seconds", status.System.Uptime)
-		
+
 		printInfo("Performance:")
 		printInfo("  HashRate: %.2f %s", status.Performance.HashRate, status.Performance.HashRateUnit)
 		printInfo("  Power: %.2f W", status.Performance.PowerUsage)
 		printInfo("  Efficiency: %.2f J/TH", status.Performance.Efficiency)
 		printInfo("  Accepted: %d", status.Performance.Accepted)
 		printInfo("  Rejected: %d", status.Performance.Rejected)
-		
+
 		return nil
 	})
 
@@ -310,11 +311,11 @@ func (s *VnishIntegrationTestSuite) testPerformanceMetrics() {
 		printInfo("Shares Accepted: %d", summary.Performance.Accepted)
 		printInfo("Shares Rejected: %d", summary.Performance.Rejected)
 		printInfo("Active Pools: %d", len(summary.Pools))
-		
+
 		for i, pool := range summary.Pools {
 			printInfo("Pool %d: %s (%s)", i+1, pool.URL, pool.Status)
 		}
-		
+
 		return nil
 	})
 
@@ -331,11 +332,11 @@ func (s *VnishIntegrationTestSuite) testPerformanceMetrics() {
 		printInfo("  Power Usage: %.2f W", perf.PowerUsage)
 		printInfo("  Efficiency: %.2f J/TH", perf.Efficiency)
 		printInfo("  Hardware Errors: %d", perf.HardwareErrors)
-		
+
 		if perf.HashRate < 0 {
 			return fmt.Errorf("expected non-negative hash rate")
 		}
-		
+
 		return nil
 	})
 
@@ -352,12 +353,12 @@ func (s *VnishIntegrationTestSuite) testPerformanceMetrics() {
 		printInfo("Temperature data points: %d", len(metrics.Temperature))
 		printInfo("Power data points: %d", len(metrics.Power))
 		printInfo("Fan speed data points: %d", len(metrics.FanSpeed))
-		
+
 		if len(metrics.HashRate) > 0 {
 			latest := metrics.HashRate[len(metrics.HashRate)-1]
 			printInfo("Latest hash rate: %.2f at %v", latest.Value, latest.Time)
 		}
-		
+
 		return nil
 	})
 }
@@ -374,7 +375,7 @@ func (s *VnishIntegrationTestSuite) testHardwareStatus() {
 		}
 
 		printInfo("Found %d chains", len(chains))
-		
+
 		for i, chain := range chains {
 			printInfo("Chain %d:", i)
 			printInfo("  Index: %d", chain.Index)
@@ -384,12 +385,12 @@ func (s *VnishIntegrationTestSuite) testHardwareStatus() {
 			printInfo("  Chip Count: %d", chain.ChipCount)
 			printInfo("  Frequency: %d MHz", chain.Frequency)
 			printInfo("  Voltage: %.2f V", chain.Voltage)
-			
+
 			if chain.ChipCount <= 0 {
 				return fmt.Errorf("chain %d: expected positive chip count", i)
 			}
 		}
-		
+
 		return nil
 	})
 
@@ -408,22 +409,22 @@ func (s *VnishIntegrationTestSuite) testPoolOperations() {
 		}
 
 		printInfo("Found %d pools configured", len(settings.Pools))
-		
+
 		for i, pool := range settings.Pools {
 			printInfo("Pool %d:", i+1)
 			printInfo("  URL: %s", pool.URL)
 			printInfo("  User: %s", pool.User)
 			printInfo("  Pass: %s", maskPassword(pool.Password))
-			
+
 			if pool.URL == "" {
 				printWarning("  Pool %d has empty URL", i+1)
 			}
 		}
-		
+
 		if len(settings.Pools) == 0 {
 			return fmt.Errorf("expected at least one pool")
 		}
-		
+
 		return nil
 	})
 
@@ -431,48 +432,48 @@ func (s *VnishIntegrationTestSuite) testPoolOperations() {
 	if !*skipWriteOps {
 		s.runTest("Update Pool Settings", func() error {
 			ctx := context.Background()
-			
+
 			// First get current settings
 			current, err := s.client.GetSettings(ctx)
 			if err != nil {
 				return err
 			}
-			
+
 			if len(current.Pools) == 0 {
 				return fmt.Errorf("no pools to update")
 			}
-			
+
 			// Create a test modification (just change the password slightly)
 			testPool := current.Pools[0]
 			originalPass := testPool.Password
 			testPool.Password = originalPass + "-test"
-			
+
 			printInfo("Updating pool 1 password for testing...")
-			
+
 			// Update the pool
 			settings := &models.Settings{
 				Pools: []models.PoolConfig{testPool},
 			}
-			
+
 			err = s.client.UpdateSettings(ctx, settings)
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Pool updated successfully")
-			
+
 			// Restore original settings
 			time.Sleep(2 * time.Second)
 			testPool.Password = originalPass
 			settings.Pools[0] = testPool
-			
+
 			err = s.client.UpdateSettings(ctx, settings)
 			if err != nil {
 				printWarning("Failed to restore original pool: %v", err)
 			} else {
 				printInfo("Original pool settings restored")
 			}
-			
+
 			return nil
 		})
 	} else {
@@ -493,7 +494,7 @@ func (s *VnishIntegrationTestSuite) testAutotuneOperations() {
 		}
 
 		printInfo("Found %d autotune presets", len(presets.Presets))
-		
+
 		for _, preset := range presets.Presets {
 			printInfo("Preset: %s", preset.ID)
 			printInfo("  Name: %s", preset.Name)
@@ -502,7 +503,7 @@ func (s *VnishIntegrationTestSuite) testAutotuneOperations() {
 			printInfo("  Power: %.2f W", preset.Power)
 			printInfo("  Efficiency: %.2f J/TH", preset.Efficiency)
 		}
-		
+
 		return nil
 	})
 
@@ -510,34 +511,34 @@ func (s *VnishIntegrationTestSuite) testAutotuneOperations() {
 	if !*skipAutotuneOps {
 		s.runTest("Set Autotune Mode", func() error {
 			ctx := context.Background()
-			
+
 			// Get current settings
 			settings, err := s.client.GetSettings(ctx)
 			if err != nil {
 				return err
 			}
-			
+
 			originalAutotune := settings.Advanced.AutoTune
 			printInfo("Current autotune enabled: %v", originalAutotune)
-			
+
 			// Toggle autotune
 			testAutotune := !originalAutotune
-			
+
 			printInfo("Setting autotune to: %v", testAutotune)
-			
+
 			newSettings := &models.Settings{
 				Advanced: models.AdvancedSettings{
 					AutoTune: testAutotune,
 				},
 			}
-			
+
 			err = s.client.UpdateSettings(ctx, newSettings)
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Autotune setting changed successfully")
-			
+
 			// Restore original mode
 			time.Sleep(2 * time.Second)
 			newSettings.Advanced.AutoTune = originalAutotune
@@ -547,7 +548,7 @@ func (s *VnishIntegrationTestSuite) testAutotuneOperations() {
 			} else {
 				printInfo("Original autotune setting restored")
 			}
-			
+
 			return nil
 		})
 	} else {
@@ -572,14 +573,14 @@ func (s *VnishIntegrationTestSuite) testSettingsOperations() {
 		printInfo("  Low Power Mode: %v", settings.Advanced.LowPowerMode)
 		printInfo("  Immersion Mode: %v", settings.Advanced.ImmersionMode)
 		printInfo("  Pools: %d configured", len(settings.Pools))
-		
+
 		printInfo("  Network DHCP: %v", settings.Network.DHCP)
 		if !settings.Network.DHCP {
 			printInfo("  IP: %s", settings.Network.IPAddress)
 			printInfo("  Netmask: %s", settings.Network.Netmask)
 			printInfo("  Gateway: %s", settings.Network.Gateway)
 		}
-		
+
 		return nil
 	})
 }
@@ -588,7 +589,7 @@ func (s *VnishIntegrationTestSuite) testLogOperations() {
 	printTestHeader("Log Operations")
 
 	logTypes := []string{"system", "miner", "error"}
-	
+
 	for _, logType := range logTypes {
 		testName := fmt.Sprintf("Get %s Logs", strings.Title(logType))
 		s.runTest(testName, func() error {
@@ -599,20 +600,20 @@ func (s *VnishIntegrationTestSuite) testLogOperations() {
 				printWarning("%s logs not available: %v", logType, err)
 				return nil
 			}
-			
+
 			printInfo("Retrieved %d %s log entries", len(logs), logType)
-			
+
 			// Show a few recent entries if available
 			showCount := 3
 			if len(logs) < showCount {
 				showCount = len(logs)
 			}
-			
+
 			for i := 0; i < showCount; i++ {
 				log := logs[i]
 				printInfo("  [%v] %s: %s", log.Timestamp, log.Level, log.Message)
 			}
-			
+
 			return nil
 		})
 	}
@@ -636,15 +637,15 @@ func (s *VnishIntegrationTestSuite) testNotesOperations() {
 		if err != nil {
 			return err
 		}
-		
+
 		printInfo("Found %d existing notes", len(notes))
 		for i, note := range notes {
 			if i < 3 { // Show first 3 notes
-				printInfo("  Note %s: %s... (created: %v)", 
+				printInfo("  Note %s: %s... (created: %v)",
 					note.ID, truncateString(note.Content, 50), note.CreatedAt)
 			}
 		}
-		
+
 		return nil
 	})
 
@@ -652,16 +653,16 @@ func (s *VnishIntegrationTestSuite) testNotesOperations() {
 	s.runTest("Create Note", func() error {
 		ctx := context.Background()
 		content := fmt.Sprintf("Integration test note - %s", time.Now().Format(time.RFC3339))
-		
+
 		note, err := s.client.CreateNote(ctx, content)
 		if err != nil {
 			return err
 		}
-		
+
 		testNoteID = note.ID
 		printInfo("Created note with ID: %s", note.ID)
 		printInfo("Content: %s", note.Content)
-		
+
 		return nil
 	})
 
@@ -673,11 +674,11 @@ func (s *VnishIntegrationTestSuite) testNotesOperations() {
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Retrieved note %s", note.ID)
 			printInfo("Content: %s", note.Content)
 			printInfo("Created: %v", note.CreatedAt)
-			
+
 			return nil
 		})
 
@@ -685,15 +686,15 @@ func (s *VnishIntegrationTestSuite) testNotesOperations() {
 		s.runTest("Update Note", func() error {
 			ctx := context.Background()
 			newContent := fmt.Sprintf("Updated: Integration test - %s", time.Now().Format(time.RFC3339))
-			
+
 			note, err := s.client.UpdateNote(ctx, testNoteID, newContent)
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Updated note %s", note.ID)
 			printInfo("New content: %s", note.Content)
-			
+
 			return nil
 		})
 
@@ -704,7 +705,7 @@ func (s *VnishIntegrationTestSuite) testNotesOperations() {
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Deleted test note %s", testNoteID)
 			return nil
 		})
@@ -730,12 +731,12 @@ func (s *VnishIntegrationTestSuite) testAPIKeyOperations() {
 			printWarning("GetAPIKeys failed (might need permissions): %v", err)
 			return nil // Don't fail test if no permission
 		}
-		
+
 		printInfo("Found %d API keys", len(keys))
 		for _, key := range keys {
 			printInfo("  Key: %s (ID: %s, Created: %v)", key.Name, key.ID, key.CreatedAt)
 		}
-		
+
 		return nil
 	})
 
@@ -743,18 +744,18 @@ func (s *VnishIntegrationTestSuite) testAPIKeyOperations() {
 	s.runTest("Create API Key", func() error {
 		ctx := context.Background()
 		keyName := fmt.Sprintf("test-key-%d", time.Now().Unix())
-		
+
 		result, err := s.client.AddAPIKey(ctx, keyName)
 		if err != nil {
 			printWarning("AddAPIKey failed (might need permissions): %v", err)
 			return nil // Don't fail test if no permission
 		}
-		
+
 		if !result.Status.Success {
 			printWarning("Failed to create API key: %s", result.Status.Message)
 			return nil
 		}
-		
+
 		// Find the created key
 		keys, err := s.client.GetAPIKeys(ctx)
 		if err == nil {
@@ -769,7 +770,7 @@ func (s *VnishIntegrationTestSuite) testAPIKeyOperations() {
 				}
 			}
 		}
-		
+
 		return nil
 	})
 
@@ -782,7 +783,7 @@ func (s *VnishIntegrationTestSuite) testAPIKeyOperations() {
 				printWarning("Failed to delete test key: %v", err)
 				return nil
 			}
-			
+
 			printInfo("Deleted test API key %s", testKeyID)
 			return nil
 		})
@@ -796,22 +797,22 @@ func (s *VnishIntegrationTestSuite) testMiningControl() {
 	if !*skipRestart {
 		s.runTest("Restart Mining", func() error {
 			ctx := context.Background()
-			
+
 			printWarning("Restarting mining operation...")
 			err := s.client.RestartMining(ctx)
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Mining restart initiated, waiting %v for stabilization...", *waitAfterRestart)
 			time.Sleep(*waitAfterRestart)
-			
+
 			// Verify mining is running
 			status, err := s.client.GetStatus(ctx)
 			if err != nil {
 				return fmt.Errorf("failed to verify after restart: %v", err)
 			}
-			
+
 			printInfo("Mining status after restart: HashRate=%.2f %s", status.Performance.HashRate, status.Performance.HashRateUnit)
 			return nil
 		})
@@ -824,21 +825,21 @@ func (s *VnishIntegrationTestSuite) testMiningControl() {
 	if !*skipFindMiner {
 		s.runTest("Find Miner (LED Blink)", func() error {
 			ctx := context.Background()
-			
+
 			printInfo("Activating miner LEDs...")
 			result, err := s.client.FindMiner(ctx, true)
 			if err != nil {
 				return err
 			}
-			
+
 			if !result.Success {
 				return fmt.Errorf("find miner failed: %s", result.Message)
 			}
-			
+
 			printInfo("Miner LEDs activated for identification")
 			printInfo("Waiting 5 seconds...")
 			time.Sleep(5 * time.Second)
-			
+
 			// Turn off LEDs
 			printInfo("Deactivating miner LEDs...")
 			result, err = s.client.FindMiner(ctx, false)
@@ -849,7 +850,7 @@ func (s *VnishIntegrationTestSuite) testMiningControl() {
 			} else {
 				printWarning("Failed to turn off LEDs: %s", result.Message)
 			}
-			
+
 			return nil
 		})
 	} else {
@@ -865,16 +866,16 @@ func (s *VnishIntegrationTestSuite) testSystemOperations() {
 	if !*skipReboot {
 		s.runTest("System Reboot", func() error {
 			ctx := context.Background()
-			
+
 			printWarning("REBOOTING SYSTEM - This will take several minutes...")
 			err := s.client.Reboot(ctx)
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Reboot command sent, waiting %v before attempting reconnection...", *waitAfterReboot)
 			time.Sleep(*waitAfterReboot)
-			
+
 			// Try to reconnect with polling
 			return s.pollForReconnection(5*time.Minute, 10*time.Second)
 		})
@@ -899,13 +900,13 @@ func (s *VnishIntegrationTestSuite) pollForReconnection(timeout, interval time.D
 		case <-ticker.C:
 			attempt++
 			printInfo("Reconnection attempt %d...", attempt)
-			
+
 			// Try to get miner info
 			info, err := s.client.GetInfo(context.Background())
 			if err != nil {
 				continue // Keep trying
 			}
-			
+
 			// Success!
 			printSuccess("Miner is back online!")
 			printInfo("Hostname: %s, Uptime: %v seconds", info.Hostname, info.Uptime)
@@ -917,10 +918,10 @@ func (s *VnishIntegrationTestSuite) pollForReconnection(timeout, interval time.D
 func (s *VnishIntegrationTestSuite) runTest(name string, testFunc func() error) {
 	start := time.Now()
 	printInfo("\nTesting: %s", name)
-	
+
 	err := testFunc()
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		printError("%s failed: %v", name, err)
 		s.recordResult(name, false, false, err, duration)
@@ -934,10 +935,10 @@ func (s *VnishIntegrationTestSuite) printSummary() {
 	color.Magenta("\n" + strings.Repeat("=", 60))
 	color.Magenta("TEST SUMMARY")
 	color.Magenta(strings.Repeat("=", 60))
-	
+
 	var passed, failed, skipped int
 	var totalDuration time.Duration
-	
+
 	for _, result := range s.results {
 		if result.Skipped {
 			skipped++
@@ -955,7 +956,7 @@ func (s *VnishIntegrationTestSuite) printSummary() {
 			}
 		}
 	}
-	
+
 	color.Magenta(strings.Repeat("=", 60))
 	fmt.Printf("\nResults: ")
 	color.Green("%d passed", passed)
@@ -964,7 +965,7 @@ func (s *VnishIntegrationTestSuite) printSummary() {
 	fmt.Printf(", ")
 	color.Yellow("%d skipped", skipped)
 	fmt.Printf("\nTotal test time: %.2fs\n", totalDuration.Seconds())
-	
+
 	if failed > 0 {
 		os.Exit(1)
 	}

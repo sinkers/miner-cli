@@ -15,20 +15,20 @@ import (
 
 // Test configuration flags
 var (
-	minerHost     = flag.String("host", "10.45.3.1", "Miner host IP address")
-	minerPort     = flag.Int("port", 50051, "Miner gRPC port")
-	username      = flag.String("user", "root", "Authentication username")
-	password      = flag.String("pass", "root", "Authentication password")
-	
+	minerHost = flag.String("host", "10.45.3.1", "Miner host IP address")
+	minerPort = flag.Int("port", 50051, "Miner gRPC port")
+	username  = flag.String("user", "root", "Authentication username")
+	password  = flag.String("pass", "root", "Authentication password")
+
 	// Skip flags for potentially disruptive tests
-	skipAuth      = flag.Bool("skip-auth", false, "Skip authentication tests")
-	skipWrite     = flag.Bool("skip-write", true, "Skip write operations (pool changes, performance settings)")
-	skipReboot    = flag.Bool("skip-reboot", true, "Skip reboot test")
-	skipRestart   = flag.Bool("skip-restart", true, "Skip restart mining test")
-	skipPause     = flag.Bool("skip-pause", true, "Skip pause/resume mining test")
-	
-	verbose       = flag.Bool("verbose", true, "Enable verbose output")
-	waitTime      = flag.Duration("wait", 30*time.Second, "Wait time after disruptive operations")
+	skipAuth    = flag.Bool("skip-auth", false, "Skip authentication tests")
+	skipWrite   = flag.Bool("skip-write", true, "Skip write operations (pool changes, performance settings)")
+	skipReboot  = flag.Bool("skip-reboot", true, "Skip reboot test")
+	skipRestart = flag.Bool("skip-restart", true, "Skip restart mining test")
+	skipPause   = flag.Bool("skip-pause", true, "Skip pause/resume mining test")
+
+	verbose  = flag.Bool("verbose", true, "Enable verbose output")
+	waitTime = flag.Duration("wait", 30*time.Second, "Wait time after disruptive operations")
 )
 
 // Test result tracking
@@ -64,7 +64,7 @@ func printWarning(format string, args ...interface{}) {
 
 func printInfo(format string, args ...interface{}) {
 	if *verbose {
-		fmt.Printf("  " + format + "\n", args...)
+		fmt.Printf("  "+format+"\n", args...)
 	}
 }
 
@@ -146,7 +146,7 @@ func (s *TestSuite) testAuthentication() {
 	if *skipAuth {
 		printSkipped("Authentication Test")
 		s.recordResult("Authentication", false, true, nil, 0)
-		
+
 		// Recreate client with auth for subsequent tests
 		s.reconnectWithAuth()
 		return
@@ -217,7 +217,7 @@ func (s *TestSuite) testReadOperations() {
 		printInfo("BOS Version: %s", info.BOSVersion)
 		printInfo("Status: %s", info.Status)
 		printInfo("System Uptime: %v", info.SystemUptime)
-		
+
 		return nil
 	})
 
@@ -239,7 +239,7 @@ func (s *TestSuite) testReadOperations() {
 		}
 		printInfo("Accepted Shares: %d", stats.AcceptedShares)
 		printInfo("Rejected Shares: %d", stats.RejectedShares)
-		
+
 		return nil
 	})
 
@@ -256,7 +256,7 @@ func (s *TestSuite) testReadOperations() {
 			printInfo("Board %d: Status=%s, Voltage=%.1fV, Freq=%.0fMHz, Chips=%d",
 				i, board.Status, board.Voltage, board.Frequency, board.Chips)
 		}
-		
+
 		return nil
 	})
 
@@ -272,7 +272,7 @@ func (s *TestSuite) testReadOperations() {
 		for _, group := range groups {
 			printInfo("Group: %s", group.Name)
 		}
-		
+
 		return nil
 	})
 
@@ -292,7 +292,7 @@ func (s *TestSuite) testReadOperations() {
 		if temp, ok := cooling["highest_temperature"]; ok {
 			printInfo("Highest temperature: %+v", temp)
 		}
-		
+
 		return nil
 	})
 
@@ -310,7 +310,7 @@ func (s *TestSuite) testReadOperations() {
 		if mode, ok := tuner["mode"]; ok {
 			printInfo("Tuner Mode: %v", mode)
 		}
-		
+
 		return nil
 	})
 
@@ -325,7 +325,7 @@ func (s *TestSuite) testReadOperations() {
 		if state, ok := license["state"]; ok {
 			printInfo("License State: %v", state)
 		}
-		
+
 		return nil
 	})
 
@@ -337,7 +337,7 @@ func (s *TestSuite) testReadOperations() {
 		}
 
 		printInfo("Configuration retrieved successfully")
-		
+
 		return nil
 	})
 }
@@ -364,7 +364,7 @@ func (s *TestSuite) testPoolOperations() {
 				printInfo("  - %s", group.Name)
 			}
 		}
-		
+
 		return nil
 	})
 }
@@ -382,12 +382,12 @@ func (s *TestSuite) testPerformanceOperations() {
 	s.runTest("Set Power Target", func() error {
 		targetWatts := uint64(3000) // Example: 3000W
 		printInfo("Setting power target to %d W", targetWatts)
-		
+
 		_, err := s.client.SetPowerTarget(targetWatts)
 		if err != nil {
 			return err
 		}
-		
+
 		printInfo("Power target set successfully")
 		return nil
 	})
@@ -401,10 +401,10 @@ func (s *TestSuite) testPerformanceOperations() {
 		if err != nil {
 			return err
 		}
-		
+
 		state := models.ConvertTunerState(resp)
 		printInfo("Current tuner state: %+v", state)
-		
+
 		return nil
 	})
 }
@@ -420,10 +420,10 @@ func (s *TestSuite) testMiningControl() {
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Mining paused, waiting 10 seconds...")
 			time.Sleep(10 * time.Second)
-			
+
 			return nil
 		})
 
@@ -433,7 +433,7 @@ func (s *TestSuite) testMiningControl() {
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Mining resumed")
 			return nil
 		})
@@ -450,16 +450,16 @@ func (s *TestSuite) testMiningControl() {
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Mining restarted, waiting %v for stabilization...", *waitTime)
 			time.Sleep(*waitTime)
-			
+
 			// Verify mining is running
 			resp, err := s.client.GetMinerDetails()
 			if err != nil {
 				return fmt.Errorf("failed to verify after restart: %v", err)
 			}
-			
+
 			printInfo("Miner status: %s", resp.Status.String())
 			return nil
 		})
@@ -480,10 +480,10 @@ func (s *TestSuite) testSystemOperations() {
 			if err != nil {
 				return err
 			}
-			
+
 			printInfo("Reboot command sent, waiting %v before attempting reconnection...", *waitTime)
 			time.Sleep(*waitTime)
-			
+
 			// Try to reconnect with polling
 			return s.pollForReconnection(5*time.Minute, 10*time.Second)
 		})
@@ -508,7 +508,7 @@ func (s *TestSuite) pollForReconnection(timeout, interval time.Duration) error {
 		case <-ticker.C:
 			attempt++
 			printInfo("Reconnection attempt %d...", attempt)
-			
+
 			opts := client.SimpleClientOptions{
 				Host:     *minerHost,
 				Port:     *minerPort,
@@ -517,19 +517,19 @@ func (s *TestSuite) pollForReconnection(timeout, interval time.Duration) error {
 				Timeout:  5 * time.Second,
 				UseTLS:   false,
 			}
-			
+
 			c, err := client.NewSimpleClient(opts)
 			if err != nil {
 				continue // Keep trying
 			}
-			
+
 			// Try to get miner details to verify it's really up
 			_, err = c.GetMinerDetails()
 			if err != nil {
 				c.Close()
 				continue
 			}
-			
+
 			// Success!
 			s.client.Close()
 			s.client = c
@@ -542,10 +542,10 @@ func (s *TestSuite) pollForReconnection(timeout, interval time.Duration) error {
 func (s *TestSuite) runTest(name string, testFunc func() error) {
 	start := time.Now()
 	printInfo("\nTesting: %s", name)
-	
+
 	err := testFunc()
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		printError("%s failed: %v", name, err)
 		s.recordResult(name, false, false, err, duration)
@@ -559,10 +559,10 @@ func (s *TestSuite) printSummary() {
 	color.Magenta("\n" + strings.Repeat("=", 60))
 	color.Magenta("TEST SUMMARY")
 	color.Magenta(strings.Repeat("=", 60))
-	
+
 	var passed, failed, skipped int
 	var totalDuration time.Duration
-	
+
 	for _, result := range s.results {
 		if result.Skipped {
 			skipped++
@@ -580,7 +580,7 @@ func (s *TestSuite) printSummary() {
 			}
 		}
 	}
-	
+
 	color.Magenta(strings.Repeat("=", 60))
 	fmt.Printf("\nResults: ")
 	color.Green("%d passed", passed)
@@ -589,7 +589,7 @@ func (s *TestSuite) printSummary() {
 	fmt.Printf(", ")
 	color.Yellow("%d skipped", skipped)
 	fmt.Printf("\nTotal test time: %.2fs\n", totalDuration.Seconds())
-	
+
 	if failed > 0 {
 		os.Exit(1)
 	}

@@ -109,7 +109,7 @@ func (f *ColorFormatter) Format(results []client.Result) error {
 
 			f.formatResponse(result.Response, "  ")
 		}
-		
+
 		// Only add blank line between entries, not after the last one
 		if i < len(results)-1 {
 			fmt.Println()
@@ -245,55 +245,55 @@ type SummaryTableFormatter struct{}
 func (f *SummaryTableFormatter) Format(results []client.Result) error {
 	// Group results by subnet
 	subnetMap := make(map[string][]client.Result)
-	
+
 	for _, result := range results {
 		// Skip failed results
 		if result.Error != "" {
 			continue
 		}
-		
+
 		// Determine subnet (using /24 for simplicity)
 		ip := net.ParseIP(result.IP)
 		if ip == nil {
 			continue
 		}
-		
+
 		// Get the /24 subnet
 		subnet := getSubnet24(result.IP)
 		subnetMap[subnet] = append(subnetMap[subnet], result)
 	}
-	
+
 	// Sort subnet keys
 	var subnets []string
 	for subnet := range subnetMap {
 		subnets = append(subnets, subnet)
 	}
 	sort.Strings(subnets)
-	
+
 	// Create tabwriter
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	
+
 	// Process each subnet
 	for _, subnet := range subnets {
 		results := subnetMap[subnet]
-		
+
 		// Print subnet header
 		fmt.Fprintf(w, "\n=== Subnet: %s ===\n", subnet)
 		fmt.Fprintln(w, "IP\tAccepted\tMHS 5s\tMHS av\tHardware Errors")
 		fmt.Fprintln(w, "---\t--------\t------\t------\t---------------")
-		
+
 		// Sort IPs within subnet
 		sort.Slice(results, func(i, j int) bool {
 			return ipToInt(results[i].IP) < ipToInt(results[j].IP)
 		})
-		
+
 		// Print each result
 		for _, result := range results {
 			accepted := "-"
 			mhs5s := "-"
 			mhsAv := "-"
 			hwErrors := "-"
-			
+
 			// Extract summary data from response
 			// The response might be a struct or a map depending on how it was processed
 			// Convert to JSON and back to map to handle both cases uniformly
@@ -315,7 +315,7 @@ func (f *SummaryTableFormatter) Format(results []client.Result) error {
 					}
 				}
 			}
-			
+
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 				result.IP,
 				accepted,
@@ -325,19 +325,19 @@ func (f *SummaryTableFormatter) Format(results []client.Result) error {
 			)
 		}
 	}
-	
+
 	w.Flush()
-	
+
 	// Print summary
 	totalSuccess := 0
 	for _, results := range subnetMap {
 		totalSuccess += len(results)
 	}
-	
+
 	fmt.Printf("\n=== Summary ===\n")
 	fmt.Printf("Total subnets: %d\n", len(subnets))
 	fmt.Printf("Total hosts responding: %d\n", totalSuccess)
-	
+
 	return nil
 }
 
@@ -376,7 +376,7 @@ func toFloat64(v interface{}) float64 {
 		return float64(val)
 	case string:
 		var f float64
-		fmt.Sscanf(val, "%f", &f)
+		_, _ = fmt.Sscanf(val, "%f", &f)
 		return f
 	default:
 		return 0
@@ -385,7 +385,7 @@ func toFloat64(v interface{}) float64 {
 
 // ScanFormatter displays scan results with miner details including hashrate
 type ScanFormatter struct {
-    Verbose bool
+	Verbose bool
 }
 
 func (f *ScanFormatter) Format(results []client.Result) error {
@@ -412,93 +412,135 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	// Create tabwriter
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
-    // Print header
-    fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
-    fmt.Fprintln(w, "---\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+	// Check if any result has switch_port data to determine whether to show port column
+	hasPortData := false
+	for _, result := range results {
+		if result.Error == "" && result.Response != nil {
+			if jsonBytes, err := json.Marshal(result.Response); err == nil {
+				var respMap map[string]interface{}
+				if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+					if _, ok := respMap["switch_port"]; ok {
+						hasPortData = true
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// Print header (with or without port column)
+	if hasPortData {
+		fmt.Fprintln(w, "IP\tPort\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
+		fmt.Fprintln(w, "---\t----\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+	} else {
+		fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
+		fmt.Fprintln(w, "---\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+	}
 
 	for _, result := range results {
 		// Skip failed results unless verbose
 		if result.Error != "" {
 			if f.Verbose {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					result.IP,
-					"-",
-					"offline",
-					"-",
-					"-",
-					"-",
-					"-",
-					"-",
-					"-",
-					"-",
-				)
+				if hasPortData {
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						result.IP,
+						"-",
+						"-",
+						"offline",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+					)
+				} else {
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						result.IP,
+						"-",
+						"offline",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+						"-",
+					)
+				}
 			}
 			continue
 		}
 
 		// Extract summary data
-        firmware := "-"
-        hashrate := "-"
-        powerKW := "-"
-        chipTemp := "-"
-        tuning := "-"
-        accepted := "-"
-        rejected := "-"
-        hwErrors := "-"
-        uptime := "-"
+		firmware := "-"
+		switchPort := "-"
+		hashrate := "-"
+		powerKW := "-"
+		chipTemp := "-"
+		tuning := "-"
+		accepted := "-"
+		rejected := "-"
+		hwErrors := "-"
+		uptime := "-"
 
 		// Convert response to map for easy access
 		if jsonBytes, err := json.Marshal(result.Response); err == nil {
 			var respMap map[string]interface{}
 			if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
-                // Get firmware info
-                if val, ok := respMap["firmware"]; ok {
-                    firmware = fmt.Sprintf("%v", val)
-                }
-                // Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
-                if val, ok := respMap["MHS 5s"]; ok {
-                    mhs := toFloat64(val)
-                    hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
-                } else if val, ok := respMap["MHS av"]; ok {
-                    mhs := toFloat64(val)
-                    hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
-                } else if val, ok := respMap["GHS 5s"]; ok {
-                    // Some miners report in GH/s directly
-                    hashrate = fmt.Sprintf("%.2f", toFloat64(val))
-                } else if val, ok := respMap["GHS av"]; ok {
-                    hashrate = fmt.Sprintf("%.2f", toFloat64(val))
-                }
+				// Get firmware info
+				if val, ok := respMap["firmware"]; ok {
+					firmware = fmt.Sprintf("%v", val)
+				}
+				// Get switch port info
+				if val, ok := respMap["switch_port"]; ok {
+					switchPort = fmt.Sprintf("%v", val)
+				}
+				// Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
+				if val, ok := respMap["MHS 5s"]; ok {
+					mhs := toFloat64(val)
+					hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
+				} else if val, ok := respMap["MHS av"]; ok {
+					mhs := toFloat64(val)
+					hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
+				} else if val, ok := respMap["GHS 5s"]; ok {
+					// Some miners report in GH/s directly
+					hashrate = fmt.Sprintf("%.2f", toFloat64(val))
+				} else if val, ok := respMap["GHS av"]; ok {
+					hashrate = fmt.Sprintf("%.2f", toFloat64(val))
+				}
 
-                // Chip temperature (prefer explicitly attached value)
-                if val, ok := respMap["chip_temp_c"]; ok {
-                    chipTemp = fmt.Sprintf("%.1f", toFloat64(val))
-                } else {
-                    if t, ok := extractTempFromSummary(respMap); ok {
-                        chipTemp = fmt.Sprintf("%.1f", t)
-                    }
-                }
+				// Chip temperature (prefer explicitly attached value)
+				if val, ok := respMap["chip_temp_c"]; ok {
+					chipTemp = fmt.Sprintf("%.1f", toFloat64(val))
+				} else {
+					if t, ok := extractTempFromSummary(respMap); ok {
+						chipTemp = fmt.Sprintf("%.1f", t)
+					}
+				}
 
-                // Power consumption (Braiins miners only)
-                if val, ok := respMap["power_w"]; ok {
-                    powerW := toFloat64(val)
-                    powerKW = fmt.Sprintf("%.2f", powerW/1000.0)
-                }
+				// Power consumption (Braiins miners only)
+				if val, ok := respMap["power_w"]; ok {
+					powerW := toFloat64(val)
+					powerKW = fmt.Sprintf("%.2f", powerW/1000.0)
+				}
 
-                // Tuning status (Braiins miners only)
-                if val, ok := respMap["tuning"]; ok {
-                    if isTuning, ok := val.(bool); ok && isTuning {
-                        tuning = "Yes"
-                    } else {
-                        // Show tuner status if available
-                        if status, ok := respMap["tuner_status"].(string); ok && status != "" {
-                            tuning = status
-                        }
-                    }
-                }
+				// Tuning status (Braiins miners only)
+				if val, ok := respMap["tuning"]; ok {
+					if isTuning, ok := val.(bool); ok && isTuning {
+						tuning = "Yes"
+					} else {
+						// Show tuner status if available
+						if status, ok := respMap["tuner_status"].(string); ok && status != "" {
+							tuning = status
+						}
+					}
+				}
 
-                if val, ok := respMap["Accepted"]; ok {
-                    accepted = fmt.Sprintf("%v", val)
-                }
+				if val, ok := respMap["Accepted"]; ok {
+					accepted = fmt.Sprintf("%v", val)
+				}
 				if val, ok := respMap["Rejected"]; ok {
 					rejected = fmt.Sprintf("%v", val)
 				}
@@ -522,18 +564,34 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			}
 		}
 
-        fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-            result.IP,
-            firmware,
-            hashrate,
-            powerKW,
-            chipTemp,
-            tuning,
-            accepted,
-            rejected,
-            hwErrors,
-            uptime,
-        )
+		if hasPortData {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				result.IP,
+				switchPort,
+				firmware,
+				hashrate,
+				powerKW,
+				chipTemp,
+				tuning,
+				accepted,
+				rejected,
+				hwErrors,
+				uptime,
+			)
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				result.IP,
+				firmware,
+				hashrate,
+				powerKW,
+				chipTemp,
+				tuning,
+				accepted,
+				rejected,
+				hwErrors,
+				uptime,
+			)
+		}
 	}
 
 	w.Flush()
@@ -551,30 +609,30 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 // extractTempFromSummary scans a summary response map for plausible
 // temperature fields and returns a representative value.
 func extractTempFromSummary(resp map[string]interface{}) (float64, bool) {
-    // Prefer explicit fields
-    preferredKeys := []string{"Temperature", "Chip Temp", "ChipTemp", "Temp"}
-    for _, k := range preferredKeys {
-        if v, ok := resp[k]; ok {
-            t := toFloat64(v)
-            if t > 0 && t <= 200 {
-                return t, true
-            }
-        }
-    }
-    // Fallback: scan any temp-like keys
-    maxT := 0.0
-    found := false
-    for k, v := range resp {
-        lk := strings.ToLower(k)
-        if strings.Contains(lk, "temp") {
-            t := toFloat64(v)
-            if t > 0 && t <= 200 {
-                if !found || t > maxT {
-                    maxT = t
-                    found = true
-                }
-            }
-        }
-    }
-    return maxT, found
+	// Prefer explicit fields
+	preferredKeys := []string{"Temperature", "Chip Temp", "ChipTemp", "Temp"}
+	for _, k := range preferredKeys {
+		if v, ok := resp[k]; ok {
+			t := toFloat64(v)
+			if t > 0 && t <= 200 {
+				return t, true
+			}
+		}
+	}
+	// Fallback: scan any temp-like keys
+	maxT := 0.0
+	found := false
+	for k, v := range resp {
+		lk := strings.ToLower(k)
+		if strings.Contains(lk, "temp") {
+			t := toFloat64(v)
+			if t > 0 && t <= 200 {
+				if !found || t > maxT {
+					maxT = t
+					found = true
+				}
+			}
+		}
+	}
+	return maxT, found
 }

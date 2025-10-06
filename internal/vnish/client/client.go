@@ -85,7 +85,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	
+
 	if c.apiKey != "" {
 		req.Header.Set("X-API-Key", c.apiKey)
 	}

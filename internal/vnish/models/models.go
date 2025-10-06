@@ -59,10 +59,10 @@ type SwitchPoolRequest struct {
 
 // System info
 type SystemInfo struct {
-	Hostname    string `json:"hostname"`
-	Model       string `json:"model"`
-	Version     string `json:"version"`
-	Uptime      int64  `json:"uptime"`
+	Hostname    string    `json:"hostname"`
+	Model       string    `json:"model"`
+	Version     string    `json:"version"`
+	Uptime      int64     `json:"uptime"`
 	LoadAverage []float64 `json:"load_average"`
 }
 
@@ -103,25 +103,25 @@ type PerfSummary struct {
 }
 
 type Summary struct {
-	Status         MiningStatus `json:"status"`
-	Performance    PerfSummary  `json:"performance"`
-	Pools          []PoolInfo   `json:"pools"`
-	Temperature    TempInfo     `json:"temperature"`
-	FanSpeed       []int        `json:"fan_speed"`
-	Uptime         int64        `json:"uptime"`
-	LastShareTime  time.Time    `json:"last_share_time"`
+	Status        MiningStatus `json:"status"`
+	Performance   PerfSummary  `json:"performance"`
+	Pools         []PoolInfo   `json:"pools"`
+	Temperature   TempInfo     `json:"temperature"`
+	FanSpeed      []int        `json:"fan_speed"`
+	Uptime        int64        `json:"uptime"`
+	LastShareTime time.Time    `json:"last_share_time"`
 }
 
 type PoolInfo struct {
-	ID         int    `json:"id"`
-	URL        string `json:"url"`
-	User       string `json:"user"`
-	Status     string `json:"status"`
-	Priority   int    `json:"priority"`
-	Accepted   int64  `json:"accepted"`
-	Rejected   int64  `json:"rejected"`
-	Stale      int64  `json:"stale"`
-	LastShare  time.Time `json:"last_share,omitempty"`
+	ID        int       `json:"id"`
+	URL       string    `json:"url"`
+	User      string    `json:"user"`
+	Status    string    `json:"status"`
+	Priority  int       `json:"priority"`
+	Accepted  int64     `json:"accepted"`
+	Rejected  int64     `json:"rejected"`
+	Stale     int64     `json:"stale"`
+	LastShare time.Time `json:"last_share,omitempty"`
 }
 
 type TempInfo struct {
@@ -133,11 +133,11 @@ type TempInfo struct {
 
 // Settings
 type Settings struct {
-	Pools         []PoolConfig     `json:"pools"`
-	Fan           FanSettings      `json:"fan"`
-	Temperature   TempSettings     `json:"temperature"`
-	Advanced      AdvancedSettings `json:"advanced"`
-	Network       NetworkSettings  `json:"network"`
+	Pools       []PoolConfig     `json:"pools"`
+	Fan         FanSettings      `json:"fan"`
+	Temperature TempSettings     `json:"temperature"`
+	Advanced    AdvancedSettings `json:"advanced"`
+	Network     NetworkSettings  `json:"network"`
 }
 
 type PoolConfig struct {
@@ -163,20 +163,20 @@ type TempSettings struct {
 }
 
 type AdvancedSettings struct {
-	AutoTune      bool   `json:"autotune"`
-	AutoRestart   bool   `json:"auto_restart"`
-	LowPowerMode  bool   `json:"low_power_mode"`
-	ImmersionMode bool   `json:"immersion_mode"`
+	AutoTune       bool   `json:"autotune"`
+	AutoRestart    bool   `json:"auto_restart"`
+	LowPowerMode   bool   `json:"low_power_mode"`
+	ImmersionMode  bool   `json:"immersion_mode"`
 	CustomFirmware string `json:"custom_firmware,omitempty"`
 }
 
 type NetworkSettings struct {
-	DHCP       bool   `json:"dhcp"`
-	IPAddress  string `json:"ip_address,omitempty"`
-	Netmask    string `json:"netmask,omitempty"`
-	Gateway    string `json:"gateway,omitempty"`
-	DNS1       string `json:"dns1,omitempty"`
-	DNS2       string `json:"dns2,omitempty"`
+	DHCP      bool   `json:"dhcp"`
+	IPAddress string `json:"ip_address,omitempty"`
+	Netmask   string `json:"netmask,omitempty"`
+	Gateway   string `json:"gateway,omitempty"`
+	DNS1      string `json:"dns1,omitempty"`
+	DNS2      string `json:"dns2,omitempty"`
 }
 
 // Autotune
@@ -216,25 +216,25 @@ type LogEntry struct {
 
 // Metrics
 type Metrics struct {
-	Timestamp   time.Time          `json:"timestamp"`
-	HashRate    []MetricPoint      `json:"hash_rate"`
-	Temperature []MetricPoint      `json:"temperature"`
-	FanSpeed    []MetricPoint      `json:"fan_speed"`
-	Power       []MetricPoint      `json:"power"`
-	Shares      ShareMetrics       `json:"shares"`
-	Errors      ErrorMetrics       `json:"errors"`
+	Timestamp   time.Time     `json:"timestamp"`
+	HashRate    []MetricPoint `json:"hash_rate"`
+	Temperature []MetricPoint `json:"temperature"`
+	FanSpeed    []MetricPoint `json:"fan_speed"`
+	Power       []MetricPoint `json:"power"`
+	Shares      ShareMetrics  `json:"shares"`
+	Errors      ErrorMetrics  `json:"errors"`
 }
 
 type MetricPoint struct {
-	Time  time.Time   `json:"time"`
-	Value float64     `json:"value"`
-	Label string      `json:"label,omitempty"`
+	Time  time.Time `json:"time"`
+	Value float64   `json:"value"`
+	Label string    `json:"label,omitempty"`
 }
 
 type ShareMetrics struct {
-	Accepted   []MetricPoint `json:"accepted"`
-	Rejected   []MetricPoint `json:"rejected"`
-	Stale      []MetricPoint `json:"stale"`
+	Accepted []MetricPoint `json:"accepted"`
+	Rejected []MetricPoint `json:"rejected"`
+	Stale    []MetricPoint `json:"stale"`
 }
 
 type ErrorMetrics struct {
@@ -280,12 +280,12 @@ type LockStatus struct {
 
 // Layout
 type LayoutInfo struct {
-	Chains  int    `json:"chains"`
-	Chips   int    `json:"chips"`
-	Fans    int    `json:"fans"`
-	PSUs    int    `json:"psus"`
-	Boards  int    `json:"boards"`
-	Layout  string `json:"layout"`
+	Chains int    `json:"chains"`
+	Chips  int    `json:"chips"`
+	Fans   int    `json:"fans"`
+	PSUs   int    `json:"psus"`
+	Boards int    `json:"boards"`
+	Layout string `json:"layout"`
 }
 
 // Status response

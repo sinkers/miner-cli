@@ -10,6 +10,10 @@ import (
 	cgminer "github.com/x1unix/go-cgminer-api"
 )
 
+const (
+	cmdSummary = "summary"
+)
+
 type Result struct {
 	IP       string      `json:"ip"`
 	Port     int         `json:"port"`
@@ -103,7 +107,7 @@ func (c *Client) executeJob(j job) Result {
 	var err error
 
 	switch j.command {
-	case "summary":
+	case cmdSummary:
 		response, err = miner.Summary()
 	case "devs":
 		response, err = miner.Devs()
