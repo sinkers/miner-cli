@@ -6,7 +6,6 @@ import (
     "fmt"
     "net/http"
     "os"
-    "strconv"
     "strings"
     "time"
 
@@ -23,17 +22,12 @@ var (
 	workers      int
 	outputFormat string
 	verbose      bool
-	version      bool
 
-	poolID     int
-	poolURL    string
-	poolUser   string
-	poolPass   string
-	deviceName string
-	zeroWhich  string
-	zeroAll    bool
-	customCmd  string
-	customArgs string
+	poolID    int
+	poolURL   string
+	poolUser  string
+	poolPass  string
+	customCmd string
 )
 
 const Version = "1.0.0"
@@ -643,6 +637,3 @@ func getBraiinsStats(ip string) (BraiinsStats, bool) {
     return stats, true
 }
 
-func parseIntParam(param string) (int, error) {
-	return strconv.Atoi(param)
-}

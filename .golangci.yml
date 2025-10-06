@@ -20,6 +20,8 @@ linters-settings:
       - github.com/sirupsen/logrus
     packages-with-error-message:
       - github.com/sirupsen/logrus: "logging is allowed only by logutils.Log"
+    # Allow internal imports and cobra
+    include-go-root: false
   misspell:
     locale: US
   lll:
