@@ -390,6 +390,21 @@ type ScanFormatter struct {
 }
 
 func (f *ScanFormatter) Format(results []client.Result) error {
+	// Color definitions - define all colors at the start
+	green := color.New(color.FgGreen).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+	cyan := color.New(color.FgCyan).SprintFunc()
+	magenta := color.New(color.FgMagenta).SprintFunc()
+	blue := color.New(color.FgBlue).SprintFunc()
+	white := color.New(color.FgWhite).SprintFunc()
+	bold := color.New(color.Bold).SprintFunc()
+	boldGreen := color.New(color.FgGreen, color.Bold).SprintFunc()
+	boldYellow := color.New(color.FgYellow, color.Bold).SprintFunc()
+	boldCyan := color.New(color.FgCyan, color.Bold).SprintFunc()
+	boldMagenta := color.New(color.FgMagenta, color.Bold).SprintFunc()
+	boldRed := color.New(color.FgRed, color.Bold).SprintFunc()
+
 	// Sort results by IP
 	sort.Slice(results, func(i, j int) bool {
 		return ipToInt(results[i].IP) < ipToInt(results[j].IP)
@@ -450,52 +465,107 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 	}
 
-	fmt.Printf("\nActive Miners Found: %d out of %d scanned\n", activeCount, len(results))
+	// Header with icons
+	fmt.Printf("\n%s %s %s %s %s\n",
+		boldGreen("⛏️  MINER SCAN RESULTS"),
+		white("│"),
+		cyan("🔍 Scanned:"), boldCyan(fmt.Sprintf("%d", len(results))),
+		green("✓ Active:"), boldGreen(fmt.Sprintf("%d", activeCount)))
+
 	if activeCount == 0 {
+		fmt.Printf("\n%s %s\n", red("❌"), boldRed("No active miners found"))
 		return nil
 	}
 
-	// Display summary statistics
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Println("SUMMARY STATISTICS")
-	fmt.Println(strings.Repeat("-", 80))
+	// Display summary statistics with colors and icons
+	fmt.Println(cyan(strings.Repeat("═", 80)))
+	fmt.Printf("%s %s\n", boldCyan("📊"), bold("SUMMARY STATISTICS"))
+	fmt.Println(cyan(strings.Repeat("─", 80)))
 
-	// Temperature statistics
+	// Temperature statistics with thermometer icon
 	if len(temperatures) > 0 {
 		tempStats := calculateStats(temperatures)
-		fmt.Printf("Chip Temperature (°C):\n")
-		fmt.Printf("  Average: %.1f  |  Min: %.1f  |  Max: %.1f  |  Std Dev: %.1f\n",
-			tempStats.avg, tempStats.min, tempStats.max, tempStats.stdDev)
-		fmt.Printf("  Miners reporting: %d/%d\n", len(temperatures), activeCount)
+		tempColor := green
+		tempIcon := "🌡️"
+		if tempStats.avg > 75 {
+			tempColor = red
+			tempIcon = "🔥"
+		} else if tempStats.avg > 65 {
+			tempColor = yellow
+			tempIcon = "⚠️"
+		}
+
+		fmt.Printf("%s %s\n", tempIcon, bold("Chip Temperature (°C):"))
+		fmt.Printf("  %s %s  %s  %s %s  %s  %s %s  %s  %s %s\n",
+			white("📈 Average:"), tempColor(fmt.Sprintf("%.1f", tempStats.avg)),
+			white("│"),
+			white("📉 Min:"), green(fmt.Sprintf("%.1f", tempStats.min)),
+			white("│"),
+			white("📊 Max:"), tempColor(fmt.Sprintf("%.1f", tempStats.max)),
+			white("│"),
+			white("σ Std Dev:"), cyan(fmt.Sprintf("%.1f", tempStats.stdDev)))
+		fmt.Printf("  %s %s\n",
+			white("📡 Reporting:"),
+			boldCyan(fmt.Sprintf("%d/%d miners", len(temperatures), activeCount)))
 	} else {
-		fmt.Printf("Chip Temperature: No data available\n")
+		fmt.Printf("%s %s %s\n", "🌡️", bold("Chip Temperature:"), yellow("No data available"))
 	}
 
-	// Power statistics
+	fmt.Println()
+
+	// Power statistics with lightning icon
 	if len(powerLevels) > 0 {
 		powerStats := calculateStats(powerLevels)
-		fmt.Printf("Power Consumption (kW):\n")
-		fmt.Printf("  Average: %.2f  |  Min: %.2f  |  Max: %.2f  |  Std Dev: %.2f\n",
-			powerStats.avg/1000.0, powerStats.min/1000.0, powerStats.max/1000.0, powerStats.stdDev/1000.0)
-		fmt.Printf("  Miners reporting: %d/%d  |  Total: %.2f kW\n",
-			len(powerLevels), activeCount, powerStats.sum/1000.0)
+		fmt.Printf("%s %s\n", "⚡", bold("Power Consumption (kW):"))
+		fmt.Printf("  %s %s  %s  %s %s  %s  %s %s  %s  %s %s\n",
+			white("📈 Average:"), yellow(fmt.Sprintf("%.2f", powerStats.avg/1000.0)),
+			white("│"),
+			white("📉 Min:"), green(fmt.Sprintf("%.2f", powerStats.min/1000.0)),
+			white("│"),
+			white("📊 Max:"), yellow(fmt.Sprintf("%.2f", powerStats.max/1000.0)),
+			white("│"),
+			white("σ Std Dev:"), cyan(fmt.Sprintf("%.2f", powerStats.stdDev/1000.0)))
+		fmt.Printf("  %s %s  %s  %s %s\n",
+			white("📡 Reporting:"),
+			boldCyan(fmt.Sprintf("%d/%d miners", len(powerLevels), activeCount)),
+			white("│"),
+			white("⚡ Total:"),
+			boldYellow(fmt.Sprintf("%.2f kW", powerStats.sum/1000.0)))
 	} else {
-		fmt.Printf("Power Consumption: No data available\n")
+		fmt.Printf("%s %s %s\n", "⚡", bold("Power Consumption:"), yellow("No data available"))
 	}
 
-	// Hashrate statistics
+	fmt.Println()
+
+	// Hashrate statistics with pickaxe icon
 	if len(hashrates) > 0 {
 		hashStats := calculateStats(hashrates)
-		fmt.Printf("Hashrate (GH/s):\n")
-		fmt.Printf("  Average: %.2f  |  Min: %.2f  |  Max: %.2f  |  Std Dev: %.2f\n",
-			hashStats.avg, hashStats.min, hashStats.max, hashStats.stdDev)
-		fmt.Printf("  Miners reporting: %d/%d  |  Total: %.2f GH/s\n",
-			len(hashrates), activeCount, hashStats.sum)
+		// Format total hashrate nicely (TH/s if > 1000 GH/s)
+		totalHashStr := fmt.Sprintf("%.2f GH/s", hashStats.sum)
+		if hashStats.sum > 1000 {
+			totalHashStr = fmt.Sprintf("%.2f TH/s", hashStats.sum/1000.0)
+		}
+
+		fmt.Printf("%s %s\n", "⛏️", bold("Hashrate (GH/s):"))
+		fmt.Printf("  %s %s  %s  %s %s  %s  %s %s  %s  %s %s\n",
+			white("📈 Average:"), magenta(fmt.Sprintf("%.2f", hashStats.avg)),
+			white("│"),
+			white("📉 Min:"), cyan(fmt.Sprintf("%.2f", hashStats.min)),
+			white("│"),
+			white("📊 Max:"), magenta(fmt.Sprintf("%.2f", hashStats.max)),
+			white("│"),
+			white("σ Std Dev:"), cyan(fmt.Sprintf("%.2f", hashStats.stdDev)))
+		fmt.Printf("  %s %s  %s  %s %s\n",
+			white("📡 Reporting:"),
+			boldCyan(fmt.Sprintf("%d/%d miners", len(hashrates), activeCount)),
+			white("│"),
+			white("💰 Total:"),
+			boldMagenta(totalHashStr))
 	} else {
-		fmt.Printf("Hashrate: No data available\n")
+		fmt.Printf("%s %s %s\n", "⛏️", bold("Hashrate:"), yellow("No data available"))
 	}
 
-	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println(cyan(strings.Repeat("═", 80)))
 
 	// Create tabwriter
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -516,13 +586,16 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 	}
 
+	// Color for table header
+	headerColor := color.New(color.FgCyan, color.Bold).SprintFunc()
+
 	// Print header (with or without port column)
 	if hasPortData {
-		fmt.Fprintln(w, "IP\tPort\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
-		fmt.Fprintln(w, "---\t----\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+		fmt.Fprintln(w, headerColor("IP\tPort\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime"))
+		fmt.Fprintln(w, cyan("───\t────\t────────\t──────────────\t──────────\t─────────\t──────\t────────\t────────\t─────────\t──────"))
 	} else {
-		fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
-		fmt.Fprintln(w, "---\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+		fmt.Fprintln(w, headerColor("IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime"))
+		fmt.Fprintln(w, cyan("───\t────────\t──────────────\t──────────\t─────────\t──────\t────────\t────────\t─────────\t──────"))
 	}
 
 	for _, result := range results {
@@ -652,44 +725,127 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			}
 		}
 
+		// Color the data based on values
+		ipColor := white(result.IP)
+
+		// Color firmware based on type
+		firmwareColor := firmware
+		if strings.Contains(firmware, "Braiins") {
+			firmwareColor = blue(firmware)
+		} else if firmware == "Stock" {
+			firmwareColor = white(firmware)
+		}
+
+		// Color hashrate
+		hashrateColor := hashrate
+		if hashrate != "-" {
+			hr := toFloat64(strings.TrimSuffix(hashrate, " GH/s"))
+			if hr > 130000 {
+				hashrateColor = boldMagenta(hashrate)
+			} else if hr > 125000 {
+				hashrateColor = magenta(hashrate)
+			} else {
+				hashrateColor = cyan(hashrate)
+			}
+		}
+
+		// Color power
+		powerColor := powerKW
+		if powerKW != "-" {
+			pw := toFloat64(strings.TrimSuffix(powerKW, " kW"))
+			if pw > 4.2 {
+				powerColor = red(powerKW)
+			} else {
+				powerColor = yellow(powerKW)
+			}
+		}
+
+		// Color temperature based on value
+		tempColor := chipTemp
+		if chipTemp != "-" {
+			temp := toFloat64(strings.TrimSuffix(chipTemp, "°C"))
+			if temp > 75 {
+				tempColor = boldRed(chipTemp)
+			} else if temp > 65 {
+				tempColor = yellow(chipTemp)
+			} else {
+				tempColor = green(chipTemp)
+			}
+		}
+
+		// Color tuning status
+		tuningColor := tuning
+		if tuning == "STABLE" {
+			tuningColor = green("✓ " + tuning)
+		} else if tuning == "Yes" || tuning == "TUNING" {
+			tuningColor = yellow("⚙ " + tuning)
+		} else if tuning != "-" {
+			tuningColor = cyan(tuning)
+		}
+
+		// Color HW errors
+		hwErrorsColor := hwErrors
+		if hwErrors != "-" {
+			errors := toFloat64(hwErrors)
+			if errors > 100 {
+				hwErrorsColor = boldRed(hwErrors)
+			} else if errors > 0 {
+				hwErrorsColor = yellow(hwErrors)
+			} else {
+				hwErrorsColor = green(hwErrors)
+			}
+		}
+
+		// Color uptime
+		uptimeColor := cyan(uptime)
+
 		if hasPortData {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				result.IP,
-				switchPort,
-				firmware,
-				hashrate,
-				powerKW,
-				chipTemp,
-				tuning,
-				accepted,
-				rejected,
-				hwErrors,
-				uptime,
+				ipColor,
+				white(switchPort),
+				firmwareColor,
+				hashrateColor,
+				powerColor,
+				tempColor,
+				tuningColor,
+				white(accepted),
+				white(rejected),
+				hwErrorsColor,
+				uptimeColor,
 			)
 		} else {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				result.IP,
-				firmware,
-				hashrate,
-				powerKW,
-				chipTemp,
-				tuning,
-				accepted,
-				rejected,
-				hwErrors,
-				uptime,
+				ipColor,
+				firmwareColor,
+				hashrateColor,
+				powerColor,
+				tempColor,
+				tuningColor,
+				white(accepted),
+				white(rejected),
+				hwErrorsColor,
+				uptimeColor,
 			)
 		}
 	}
 
 	w.Flush()
 
-	// Print summary
-	fmt.Println(strings.Repeat("=", 80))
+	// Print summary footer with colors and icons
+	fmt.Println(cyan(strings.Repeat("═", 80)))
 	if f.Verbose && activeCount < len(results) {
-		fmt.Printf("Total: %d hosts scanned, %d active, %d offline\n",
-			len(results), activeCount, len(results)-activeCount)
+		fmt.Printf("%s %s %s  %s  %s %s  %s  %s %s\n",
+			white("📊"),
+			white("Total:"),
+			boldCyan(fmt.Sprintf("%d", len(results))),
+			white("│"),
+			green("✅ Active:"),
+			boldGreen(fmt.Sprintf("%d", activeCount)),
+			white("│"),
+			red("❌ Offline:"),
+			boldRed(fmt.Sprintf("%d", len(results)-activeCount)))
 	}
+	fmt.Printf("\n%s %s\n", green("✨"), bold("Scan completed successfully!"))
 
 	return nil
 }
