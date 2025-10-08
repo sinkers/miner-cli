@@ -3,6 +3,7 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"sort"
@@ -394,17 +395,104 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		return ipToInt(results[i].IP) < ipToInt(results[j].IP)
 	})
 
-	// Count active miners
+	// Count active miners and collect statistics
 	activeCount := 0
+	var temperatures []float64
+	var powerLevels []float64
+	var hashrates []float64
+
 	for _, result := range results {
 		if result.Error == "" {
 			activeCount++
+
+			// Extract data for statistics
+			if result.Response != nil {
+				if jsonBytes, err := json.Marshal(result.Response); err == nil {
+					var respMap map[string]interface{}
+					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+						// Collect chip temperature
+						if val, ok := respMap["chip_temp_c"]; ok {
+							if temp := toFloat64(val); temp > 0 && temp <= 200 {
+								temperatures = append(temperatures, temp)
+							}
+						} else if t, ok := extractTempFromSummary(respMap); ok && t > 0 && t <= 200 {
+							temperatures = append(temperatures, t)
+						}
+
+						// Collect power consumption (in watts)
+						if val, ok := respMap["power_w"]; ok {
+							if power := toFloat64(val); power > 0 {
+								powerLevels = append(powerLevels, power)
+							}
+						}
+
+						// Collect hashrate (convert to GH/s)
+						if val, ok := respMap["MHS 5s"]; ok {
+							if mhs := toFloat64(val); mhs > 0 {
+								hashrates = append(hashrates, mhs/1000.0)
+							}
+						} else if val, ok := respMap["MHS av"]; ok {
+							if mhs := toFloat64(val); mhs > 0 {
+								hashrates = append(hashrates, mhs/1000.0)
+							}
+						} else if val, ok := respMap["GHS 5s"]; ok {
+							if ghs := toFloat64(val); ghs > 0 {
+								hashrates = append(hashrates, ghs)
+							}
+						} else if val, ok := respMap["GHS av"]; ok {
+							if ghs := toFloat64(val); ghs > 0 {
+								hashrates = append(hashrates, ghs)
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 
 	fmt.Printf("\nActive Miners Found: %d out of %d scanned\n", activeCount, len(results))
 	if activeCount == 0 {
 		return nil
+	}
+
+	// Display summary statistics
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println("SUMMARY STATISTICS")
+	fmt.Println(strings.Repeat("-", 80))
+
+	// Temperature statistics
+	if len(temperatures) > 0 {
+		tempStats := calculateStats(temperatures)
+		fmt.Printf("Chip Temperature (°C):\n")
+		fmt.Printf("  Average: %.1f  |  Min: %.1f  |  Max: %.1f  |  Std Dev: %.1f\n",
+			tempStats.avg, tempStats.min, tempStats.max, tempStats.stdDev)
+		fmt.Printf("  Miners reporting: %d/%d\n", len(temperatures), activeCount)
+	} else {
+		fmt.Printf("Chip Temperature: No data available\n")
+	}
+
+	// Power statistics
+	if len(powerLevels) > 0 {
+		powerStats := calculateStats(powerLevels)
+		fmt.Printf("Power Consumption (kW):\n")
+		fmt.Printf("  Average: %.2f  |  Min: %.2f  |  Max: %.2f  |  Std Dev: %.2f\n",
+			powerStats.avg/1000.0, powerStats.min/1000.0, powerStats.max/1000.0, powerStats.stdDev/1000.0)
+		fmt.Printf("  Miners reporting: %d/%d  |  Total: %.2f kW\n",
+			len(powerLevels), activeCount, powerStats.sum/1000.0)
+	} else {
+		fmt.Printf("Power Consumption: No data available\n")
+	}
+
+	// Hashrate statistics
+	if len(hashrates) > 0 {
+		hashStats := calculateStats(hashrates)
+		fmt.Printf("Hashrate (GH/s):\n")
+		fmt.Printf("  Average: %.2f  |  Min: %.2f  |  Max: %.2f  |  Std Dev: %.2f\n",
+			hashStats.avg, hashStats.min, hashStats.max, hashStats.stdDev)
+		fmt.Printf("  Miners reporting: %d/%d  |  Total: %.2f GH/s\n",
+			len(hashrates), activeCount, hashStats.sum)
+	} else {
+		fmt.Printf("Hashrate: No data available\n")
 	}
 
 	fmt.Println(strings.Repeat("=", 80))
@@ -635,4 +723,54 @@ func extractTempFromSummary(resp map[string]interface{}) (float64, bool) {
 		}
 	}
 	return maxT, found
+}
+
+// stats holds statistical calculations
+type stats struct {
+	avg    float64
+	min    float64
+	max    float64
+	stdDev float64
+	sum    float64
+}
+
+// calculateStats computes statistics for a slice of float64 values
+func calculateStats(values []float64) stats {
+	if len(values) == 0 {
+		return stats{}
+	}
+
+	// Calculate sum, min, max
+	sum := 0.0
+	min := values[0]
+	max := values[0]
+	for _, v := range values {
+		sum += v
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+
+	// Calculate average
+	avg := sum / float64(len(values))
+
+	// Calculate standard deviation
+	variance := 0.0
+	for _, v := range values {
+		diff := v - avg
+		variance += diff * diff
+	}
+	variance /= float64(len(values))
+	stdDev := math.Sqrt(variance)
+
+	return stats{
+		avg:    avg,
+		min:    min,
+		max:    max,
+		stdDev: stdDev,
+		sum:    sum,
+	}
 }
