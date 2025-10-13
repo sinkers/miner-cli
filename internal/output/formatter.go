@@ -466,7 +466,7 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	}
 
 	// Header with icons
-	fmt.Printf("\n%s %s %s %s %s\n",
+	fmt.Printf("\n%s %s %s %s %s %s\n",
 		boldGreen("⛏️  MINER SCAN RESULTS"),
 		white("│"),
 		cyan("🔍 Scanned:"), boldCyan(fmt.Sprintf("%d", len(results))),
