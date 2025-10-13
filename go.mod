@@ -1,9 +1,10 @@
 module github.com/sinkers/miner-cli
 
-go 1.23
+go 1.22.0
 
 require (
 	github.com/fatih/color v1.18.0
+	github.com/gosnmp/gosnmp v1.42.1
 	github.com/spf13/cobra v1.8.0
 	github.com/x1unix/go-cgminer-api v1.1.1
 	google.golang.org/grpc v1.56.3
@@ -12,7 +13,6 @@ require (
 
 require (
 	github.com/golang/protobuf v1.5.3 // indirect
-	github.com/gosnmp/gosnmp v1.42.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

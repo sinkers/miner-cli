@@ -3,6 +3,7 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"sort"
@@ -388,26 +389,220 @@ type ScanFormatter struct {
 	Verbose bool
 }
 
+// scanStats holds collected statistics from scan results
+type scanStats struct {
+	activeCount  int
+	temperatures []float64
+	powerLevels  []float64
+	hashrates    []float64
+}
+
+// collectScanStats gathers statistics from scan results
+func (f *ScanFormatter) collectScanStats(results []client.Result) scanStats {
+	var stats scanStats
+
+	for _, result := range results {
+		if result.Error == "" {
+			stats.activeCount++
+
+			// Extract data for statistics
+			if result.Response != nil {
+				if jsonBytes, err := json.Marshal(result.Response); err == nil {
+					var respMap map[string]interface{}
+					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+						// Collect chip temperature
+						if val, ok := respMap["chip_temp_c"]; ok {
+							if temp := toFloat64(val); temp > 0 && temp <= 200 {
+								stats.temperatures = append(stats.temperatures, temp)
+							}
+						} else if t, ok := extractTempFromSummary(respMap); ok && t > 0 && t <= 200 {
+							stats.temperatures = append(stats.temperatures, t)
+						}
+
+						// Collect power consumption (in watts)
+						if val, ok := respMap["power_w"]; ok {
+							if power := toFloat64(val); power > 0 {
+								stats.powerLevels = append(stats.powerLevels, power)
+							}
+						}
+
+						// Collect hashrate (convert to GH/s)
+						if val, ok := respMap["MHS 5s"]; ok {
+							if mhs := toFloat64(val); mhs > 0 {
+								stats.hashrates = append(stats.hashrates, mhs/1000.0)
+							}
+						} else if val, ok := respMap["MHS av"]; ok {
+							if mhs := toFloat64(val); mhs > 0 {
+								stats.hashrates = append(stats.hashrates, mhs/1000.0)
+							}
+						} else if val, ok := respMap["GHS 5s"]; ok {
+							if ghs := toFloat64(val); ghs > 0 {
+								stats.hashrates = append(stats.hashrates, ghs)
+							}
+						} else if val, ok := respMap["GHS av"]; ok {
+							if ghs := toFloat64(val); ghs > 0 {
+								stats.hashrates = append(stats.hashrates, ghs)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return stats
+}
+
+// printScanHeader prints the scan results header
+func (f *ScanFormatter) printScanHeader(results []client.Result, activeCount int, boldGreen, white, cyan, boldCyan, green, red, boldRed func(a ...interface{}) string) {
+	fmt.Printf("\n%s %s %s %s %s %s\n",
+		boldGreen("⛏️  MINER SCAN RESULTS"),
+		white("│"),
+		cyan("🔍 Scanned:"), boldCyan(fmt.Sprintf("%d", len(results))),
+		green("✓ Active:"), boldGreen(fmt.Sprintf("%d", activeCount)))
+
+	if activeCount == 0 {
+		fmt.Printf("\n%s %s\n", red("❌"), boldRed("No active miners found"))
+	}
+}
+
+// printSummaryStats prints the summary statistics section
+func (f *ScanFormatter) printSummaryStats(stats scanStats, green, red, yellow, cyan, magenta, white, bold, boldCyan, boldYellow, boldMagenta func(a ...interface{}) string) {
+	fmt.Println(cyan(strings.Repeat("═", 80)))
+	fmt.Printf("%s %s\n", boldCyan("📊"), bold("SUMMARY STATISTICS"))
+	fmt.Println(cyan(strings.Repeat("─", 80)))
+
+	// Temperature statistics
+	f.printTemperatureStats(stats, green, red, yellow, cyan, white, bold, boldCyan)
+	fmt.Println()
+
+	// Power statistics
+	f.printPowerStats(stats, green, yellow, cyan, white, bold, boldCyan, boldYellow)
+	fmt.Println()
+
+	// Hashrate statistics
+	f.printHashrateStats(stats, cyan, magenta, white, bold, boldCyan, boldMagenta, yellow)
+}
+
+// printTemperatureStats prints temperature statistics
+func (f *ScanFormatter) printTemperatureStats(stats scanStats, green, red, yellow, cyan, white, bold, boldCyan func(a ...interface{}) string) {
+	if len(stats.temperatures) > 0 {
+		tempStats := calculateStats(stats.temperatures)
+		tempColor := green
+		tempIcon := "🌡️"
+		if tempStats.avg > 75 {
+			tempColor = red
+			tempIcon = "🔥"
+		} else if tempStats.avg > 65 {
+			tempColor = yellow
+			tempIcon = "⚠️"
+		}
+
+		fmt.Printf("%s %s\n", tempIcon, bold("Chip Temperature (°C):"))
+		fmt.Printf("  %s %s  %s  %s %s  %s  %s %s  %s  %s %s\n",
+			white("📈 Average:"), tempColor(fmt.Sprintf("%.1f", tempStats.avg)),
+			white("│"),
+			white("📉 Min:"), green(fmt.Sprintf("%.1f", tempStats.min)),
+			white("│"),
+			white("📊 Max:"), tempColor(fmt.Sprintf("%.1f", tempStats.max)),
+			white("│"),
+			white("σ Std Dev:"), cyan(fmt.Sprintf("%.1f", tempStats.stdDev)))
+		fmt.Printf("  %s %s\n",
+			white("📡 Reporting:"),
+			boldCyan(fmt.Sprintf("%d/%d miners", len(stats.temperatures), stats.activeCount)))
+	} else {
+		fmt.Printf("%s %s %s\n", "🌡️", bold("Chip Temperature:"), yellow("No data available"))
+	}
+}
+
+// printPowerStats prints power consumption statistics
+func (f *ScanFormatter) printPowerStats(stats scanStats, green, yellow, cyan, white, bold, boldCyan, boldYellow func(a ...interface{}) string) {
+	if len(stats.powerLevels) > 0 {
+		powerStats := calculateStats(stats.powerLevels)
+		fmt.Printf("%s %s\n", "⚡", bold("Power Consumption (kW):"))
+		fmt.Printf("  %s %s  %s  %s %s  %s  %s %s  %s  %s %s\n",
+			white("📈 Average:"), yellow(fmt.Sprintf("%.2f", powerStats.avg/1000.0)),
+			white("│"),
+			white("📉 Min:"), green(fmt.Sprintf("%.2f", powerStats.min/1000.0)),
+			white("│"),
+			white("📊 Max:"), yellow(fmt.Sprintf("%.2f", powerStats.max/1000.0)),
+			white("│"),
+			white("σ Std Dev:"), cyan(fmt.Sprintf("%.2f", powerStats.stdDev/1000.0)))
+		fmt.Printf("  %s %s  %s  %s %s\n",
+			white("📡 Reporting:"),
+			boldCyan(fmt.Sprintf("%d/%d miners", len(stats.powerLevels), stats.activeCount)),
+			white("│"),
+			white("⚡ Total:"),
+			boldYellow(fmt.Sprintf("%.2f kW", powerStats.sum/1000.0)))
+	} else {
+		fmt.Printf("%s %s %s\n", "⚡", bold("Power Consumption:"), yellow("No data available"))
+	}
+}
+
+// printHashrateStats prints hashrate statistics
+func (f *ScanFormatter) printHashrateStats(stats scanStats, cyan, magenta, white, bold, boldCyan, boldMagenta, yellow func(a ...interface{}) string) {
+	if len(stats.hashrates) > 0 {
+		hashStats := calculateStats(stats.hashrates)
+		totalHashStr := fmt.Sprintf("%.2f GH/s", hashStats.sum)
+		if hashStats.sum > 1000 {
+			totalHashStr = fmt.Sprintf("%.2f TH/s", hashStats.sum/1000.0)
+		}
+
+		fmt.Printf("%s %s\n", "⛏️", bold("Hashrate (GH/s):"))
+		fmt.Printf("  %s %s  %s  %s %s  %s  %s %s  %s  %s %s\n",
+			white("📈 Average:"), magenta(fmt.Sprintf("%.2f", hashStats.avg)),
+			white("│"),
+			white("📉 Min:"), cyan(fmt.Sprintf("%.2f", hashStats.min)),
+			white("│"),
+			white("📊 Max:"), magenta(fmt.Sprintf("%.2f", hashStats.max)),
+			white("│"),
+			white("σ Std Dev:"), cyan(fmt.Sprintf("%.2f", hashStats.stdDev)))
+		fmt.Printf("  %s %s  %s  %s %s\n",
+			white("📡 Reporting:"),
+			boldCyan(fmt.Sprintf("%d/%d miners", len(stats.hashrates), stats.activeCount)),
+			white("│"),
+			white("💰 Total:"),
+			boldMagenta(totalHashStr))
+	} else {
+		fmt.Printf("%s %s %s\n", "⛏️", bold("Hashrate:"), yellow("No data available"))
+	}
+}
+
 func (f *ScanFormatter) Format(results []client.Result) error {
+	// Color definitions - define all colors at the start
+	green := color.New(color.FgGreen).SprintFunc()
+	red := color.New(color.FgRed).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+	cyan := color.New(color.FgCyan).SprintFunc()
+	magenta := color.New(color.FgMagenta).SprintFunc()
+	blue := color.New(color.FgBlue).SprintFunc()
+	white := color.New(color.FgWhite).SprintFunc()
+	bold := color.New(color.Bold).SprintFunc()
+	boldGreen := color.New(color.FgGreen, color.Bold).SprintFunc()
+	boldYellow := color.New(color.FgYellow, color.Bold).SprintFunc()
+	boldCyan := color.New(color.FgCyan, color.Bold).SprintFunc()
+	boldMagenta := color.New(color.FgMagenta, color.Bold).SprintFunc()
+	boldRed := color.New(color.FgRed, color.Bold).SprintFunc()
+
 	// Sort results by IP
 	sort.Slice(results, func(i, j int) bool {
 		return ipToInt(results[i].IP) < ipToInt(results[j].IP)
 	})
 
-	// Count active miners
-	activeCount := 0
-	for _, result := range results {
-		if result.Error == "" {
-			activeCount++
-		}
-	}
+	// Collect statistics
+	stats := f.collectScanStats(results)
 
-	fmt.Printf("\nActive Miners Found: %d out of %d scanned\n", activeCount, len(results))
-	if activeCount == 0 {
+	// Print header
+	f.printScanHeader(results, stats.activeCount, boldGreen, white, cyan, boldCyan, green, red, boldRed)
+
+	if stats.activeCount == 0 {
 		return nil
 	}
 
-	fmt.Println(strings.Repeat("=", 80))
+	// Display summary statistics
+	f.printSummaryStats(stats, green, red, yellow, cyan, magenta, white, bold, boldCyan, boldYellow, boldMagenta)
+
+	fmt.Println(cyan(strings.Repeat("═", 80)))
 
 	// Create tabwriter
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -428,13 +623,16 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 	}
 
+	// Color for table header
+	headerColor := color.New(color.FgCyan, color.Bold).SprintFunc()
+
 	// Print header (with or without port column)
 	if hasPortData {
-		fmt.Fprintln(w, "IP\tPort\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
-		fmt.Fprintln(w, "---\t----\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+		fmt.Fprintln(w, headerColor("IP\tPort\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime"))
+		fmt.Fprintln(w, cyan("───\t────\t────────\t──────────────\t──────────\t─────────\t──────\t────────\t────────\t─────────\t──────"))
 	} else {
-		fmt.Fprintln(w, "IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime")
-		fmt.Fprintln(w, "---\t--------\t--------------\t----------\t---------\t------\t--------\t--------\t---------\t------")
+		fmt.Fprintln(w, headerColor("IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime"))
+		fmt.Fprintln(w, cyan("───\t────────\t──────────────\t──────────\t─────────\t──────\t────────\t────────\t─────────\t──────"))
 	}
 
 	for _, result := range results {
@@ -564,44 +762,127 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			}
 		}
 
+		// Color the data based on values
+		ipColor := white(result.IP)
+
+		// Color firmware based on type
+		firmwareColor := firmware
+		if strings.Contains(firmware, "Braiins") {
+			firmwareColor = blue(firmware)
+		} else if firmware == "Stock" {
+			firmwareColor = white(firmware)
+		}
+
+		// Color hashrate
+		hashrateColor := hashrate
+		if hashrate != "-" {
+			hr := toFloat64(strings.TrimSuffix(hashrate, " GH/s"))
+			if hr > 130000 {
+				hashrateColor = boldMagenta(hashrate)
+			} else if hr > 125000 {
+				hashrateColor = magenta(hashrate)
+			} else {
+				hashrateColor = cyan(hashrate)
+			}
+		}
+
+		// Color power
+		powerColor := powerKW
+		if powerKW != "-" {
+			pw := toFloat64(strings.TrimSuffix(powerKW, " kW"))
+			if pw > 4.2 {
+				powerColor = red(powerKW)
+			} else {
+				powerColor = yellow(powerKW)
+			}
+		}
+
+		// Color temperature based on value
+		tempColor := chipTemp
+		if chipTemp != "-" {
+			temp := toFloat64(strings.TrimSuffix(chipTemp, "°C"))
+			if temp > 75 {
+				tempColor = boldRed(chipTemp)
+			} else if temp > 65 {
+				tempColor = yellow(chipTemp)
+			} else {
+				tempColor = green(chipTemp)
+			}
+		}
+
+		// Color tuning status
+		tuningColor := tuning
+		if tuning == "STABLE" {
+			tuningColor = green("✓ " + tuning)
+		} else if tuning == "Yes" || tuning == "TUNING" {
+			tuningColor = yellow("⚙ " + tuning)
+		} else if tuning != "-" {
+			tuningColor = cyan(tuning)
+		}
+
+		// Color HW errors
+		hwErrorsColor := hwErrors
+		if hwErrors != "-" {
+			errors := toFloat64(hwErrors)
+			if errors > 100 {
+				hwErrorsColor = boldRed(hwErrors)
+			} else if errors > 0 {
+				hwErrorsColor = yellow(hwErrors)
+			} else {
+				hwErrorsColor = green(hwErrors)
+			}
+		}
+
+		// Color uptime
+		uptimeColor := cyan(uptime)
+
 		if hasPortData {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				result.IP,
-				switchPort,
-				firmware,
-				hashrate,
-				powerKW,
-				chipTemp,
-				tuning,
-				accepted,
-				rejected,
-				hwErrors,
-				uptime,
+				ipColor,
+				white(switchPort),
+				firmwareColor,
+				hashrateColor,
+				powerColor,
+				tempColor,
+				tuningColor,
+				white(accepted),
+				white(rejected),
+				hwErrorsColor,
+				uptimeColor,
 			)
 		} else {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				result.IP,
-				firmware,
-				hashrate,
-				powerKW,
-				chipTemp,
-				tuning,
-				accepted,
-				rejected,
-				hwErrors,
-				uptime,
+				ipColor,
+				firmwareColor,
+				hashrateColor,
+				powerColor,
+				tempColor,
+				tuningColor,
+				white(accepted),
+				white(rejected),
+				hwErrorsColor,
+				uptimeColor,
 			)
 		}
 	}
 
 	w.Flush()
 
-	// Print summary
-	fmt.Println(strings.Repeat("=", 80))
-	if f.Verbose && activeCount < len(results) {
-		fmt.Printf("Total: %d hosts scanned, %d active, %d offline\n",
-			len(results), activeCount, len(results)-activeCount)
+	// Print summary footer with colors and icons
+	fmt.Println(cyan(strings.Repeat("═", 80)))
+	if f.Verbose && stats.activeCount < len(results) {
+		fmt.Printf("%s %s %s  %s  %s %s  %s  %s %s\n",
+			white("📊"),
+			white("Total:"),
+			boldCyan(fmt.Sprintf("%d", len(results))),
+			white("│"),
+			green("✅ Active:"),
+			boldGreen(fmt.Sprintf("%d", stats.activeCount)),
+			white("│"),
+			red("❌ Offline:"),
+			boldRed(fmt.Sprintf("%d", len(results)-stats.activeCount)))
 	}
+	fmt.Printf("\n%s %s\n", green("✨"), bold("Scan completed successfully!"))
 
 	return nil
 }
@@ -635,4 +916,54 @@ func extractTempFromSummary(resp map[string]interface{}) (float64, bool) {
 		}
 	}
 	return maxT, found
+}
+
+// stats holds statistical calculations
+type stats struct {
+	avg    float64
+	min    float64
+	max    float64
+	stdDev float64
+	sum    float64
+}
+
+// calculateStats computes statistics for a slice of float64 values
+func calculateStats(values []float64) stats {
+	if len(values) == 0 {
+		return stats{}
+	}
+
+	// Calculate sum, min, max
+	sum := 0.0
+	min := values[0]
+	max := values[0]
+	for _, v := range values {
+		sum += v
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+
+	// Calculate average
+	avg := sum / float64(len(values))
+
+	// Calculate standard deviation
+	variance := 0.0
+	for _, v := range values {
+		diff := v - avg
+		variance += diff * diff
+	}
+	variance /= float64(len(values))
+	stdDev := math.Sqrt(variance)
+
+	return stats{
+		avg:    avg,
+		min:    min,
+		max:    max,
+		stdDev: stdDev,
+		sum:    sum,
+	}
 }
