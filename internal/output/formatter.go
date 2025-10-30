@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -389,6 +390,74 @@ type ScanFormatter struct {
 	Verbose bool
 }
 
+// ansiRegex matches ANSI escape sequences for removing them when calculating display width
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// displayWidth returns the visible width of a string, excluding ANSI escape codes
+func displayWidth(s string) int {
+	return len(ansiRegex.ReplaceAllString(s, ""))
+}
+
+// padRight pads a string to the specified display width (accounting for ANSI codes)
+func padRight(s string, width int) string {
+	dw := displayWidth(s)
+	if dw >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-dw)
+}
+
+// tableRow represents a single row in the table with both plain and colored values
+type tableRow struct {
+	plainValues   []string
+	coloredValues []string
+}
+
+// printAlignedTable prints a table with proper column alignment, accounting for ANSI codes
+func printAlignedTable(headers []string, headerColors []func(...interface{}) string, rows []tableRow, colSpacing int) {
+	if len(rows) == 0 {
+		return
+	}
+
+	// Calculate maximum width for each column based on plain text
+	numCols := len(headers)
+	colWidths := make([]int, numCols)
+
+	// Start with header widths
+	for i, header := range headers {
+		colWidths[i] = len(header)
+	}
+
+	// Check all rows
+	for _, row := range rows {
+		for i, val := range row.plainValues {
+			if i < numCols && len(val) > colWidths[i] {
+				colWidths[i] = len(val)
+			}
+		}
+	}
+
+	// Print header with colors
+	headerParts := make([]string, numCols)
+	for i, header := range headers {
+		if i < len(headerColors) && headerColors[i] != nil {
+			headerParts[i] = padRight(headerColors[i](header), colWidths[i])
+		} else {
+			headerParts[i] = padRight(header, colWidths[i])
+		}
+	}
+	fmt.Println(strings.Join(headerParts, strings.Repeat(" ", colSpacing)))
+
+	// Print rows with colored values
+	for _, row := range rows {
+		rowParts := make([]string, numCols)
+		for i := 0; i < numCols && i < len(row.coloredValues); i++ {
+			rowParts[i] = padRight(row.coloredValues[i], colWidths[i])
+		}
+		fmt.Println(strings.Join(rowParts, strings.Repeat(" ", colSpacing)))
+	}
+}
+
 // scanStats holds collected statistics from scan results
 type scanStats struct {
 	activeCount  int
@@ -604,9 +673,6 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 
 	fmt.Println(cyan(strings.Repeat("═", 80)))
 
-	// Create tabwriter
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-
 	// Check if any result has switch_port data to determine whether to show port column
 	hasPortData := false
 	for _, result := range results {
@@ -626,46 +692,44 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	// Color for table header
 	headerColor := color.New(color.FgCyan, color.Bold).SprintFunc()
 
-	// Print header (with or without port column)
+	// Prepare table headers
+	var headers []string
+	var headerColors []func(...interface{}) string
+	var separatorLine string
+
 	if hasPortData {
-		fmt.Fprintln(w, headerColor("IP\tPort\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime"))
-		fmt.Fprintln(w, cyan("───\t────\t────────\t──────────────\t──────────\t─────────\t──────\t────────\t────────\t─────────\t──────"))
+		headers = []string{"IP", "Port", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
+		headerColors = make([]func(...interface{}) string, len(headers))
+		for i := range headerColors {
+			headerColors[i] = headerColor
+		}
+		separatorLine = cyan("───  ────  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
 	} else {
-		fmt.Fprintln(w, headerColor("IP\tFirmware\tHashrate (GH/s)\tPower (kW)\tTemp (°C)\tTuning\tAccepted\tRejected\tHW Errors\tUptime"))
-		fmt.Fprintln(w, cyan("───\t────────\t──────────────\t──────────\t─────────\t──────\t────────\t────────\t─────────\t──────"))
+		headers = []string{"IP", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
+		headerColors = make([]func(...interface{}) string, len(headers))
+		for i := range headerColors {
+			headerColors[i] = headerColor
+		}
+		separatorLine = cyan("───  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
 	}
+
+	// Collect all rows
+	var rows []tableRow
 
 	for _, result := range results {
 		// Skip failed results unless verbose
 		if result.Error != "" {
 			if f.Verbose {
 				if hasPortData {
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-						result.IP,
-						"-",
-						"-",
-						"offline",
-						"-",
-						"-",
-						"-",
-						"-",
-						"-",
-						"-",
-						"-",
-					)
+					rows = append(rows, tableRow{
+						plainValues:   []string{result.IP, "-", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), white("-"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+					})
 				} else {
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-						result.IP,
-						"-",
-						"offline",
-						"-",
-						"-",
-						"-",
-						"-",
-						"-",
-						"-",
-						"-",
-					)
+					rows = append(rows, tableRow{
+						plainValues:   []string{result.IP, "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+					})
 				}
 			}
 			continue
@@ -836,37 +900,30 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		// Color uptime
 		uptimeColor := cyan(uptime)
 
+		// Get tuning display text (with or without icons)
+		tuningDisplay := tuning
+		if tuning == "STABLE" {
+			tuningDisplay = "✓ " + tuning
+		} else if tuning == "Yes" || tuning == "TUNING" {
+			tuningDisplay = "⚙ " + tuning
+		}
+
 		if hasPortData {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				ipColor,
-				white(switchPort),
-				firmwareColor,
-				hashrateColor,
-				powerColor,
-				tempColor,
-				tuningColor,
-				white(accepted),
-				white(rejected),
-				hwErrorsColor,
-				uptimeColor,
-			)
+			rows = append(rows, tableRow{
+				plainValues:   []string{result.IP, switchPort, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
+				coloredValues: []string{ipColor, white(switchPort), firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
+			})
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				ipColor,
-				firmwareColor,
-				hashrateColor,
-				powerColor,
-				tempColor,
-				tuningColor,
-				white(accepted),
-				white(rejected),
-				hwErrorsColor,
-				uptimeColor,
-			)
+			rows = append(rows, tableRow{
+				plainValues:   []string{result.IP, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
+				coloredValues: []string{ipColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
+			})
 		}
 	}
 
-	w.Flush()
+	// Print the table with proper alignment
+	printAlignedTable(headers, headerColors, rows, 2)
+	fmt.Println(separatorLine)
 
 	// Print summary footer with colors and icons
 	fmt.Println(cyan(strings.Repeat("═", 80)))

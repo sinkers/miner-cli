@@ -1,6 +1,6 @@
 module github.com/sinkers/miner-cli
 
-go 1.22.0
+go 1.24.0
 
 require (
 	github.com/fatih/color v1.18.0
