@@ -240,10 +240,13 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	// Detect and enrich firmware information
 	enrichFirmwareInfo(results)
 
+	// Try to get info from Braiins GraphQL for miners that didn't respond to CGMiner
+	enrichBraiinsMiners(results)
+
 	// Setup switch port mapping if requested
 	portMap, arpCache := setupSwitchMapping()
 
-	// Build list of active IPs and firmware map
+	// Build list of active IPs and firmware map (include miners with recoverable errors)
 	activeIPs, firmwareMap := extractActiveMiners(results)
 
 	// Resolve MAC addresses if doing port lookups
@@ -278,19 +281,55 @@ func enrichFirmwareInfo(results []client.Result) {
 	}
 }
 
+// enrichBraiinsMiners tries to get info from Braiins GraphQL for miners that didn't respond to CGMiner
+func enrichBraiinsMiners(results []client.Result) {
+	for i := range results {
+		// Only try Braiins API for miners that had errors
+		if results[i].Error != "" {
+			// Check if it's a "Disconnected" or similar error (miner is online but not mining)
+			if strings.Contains(results[i].Error, "Disconnected") ||
+			   strings.Contains(results[i].Error, "Code: 302") {
+				// Try to get info from Braiins GraphQL
+				if firmware := getBraaiinsFirmwareInfo(results[i].IP); firmware != "" {
+					// Miner is a Braiins OS miner, create a minimal response
+					results[i].Response = map[string]interface{}{
+						"firmware": firmware,
+						"MHS 5s":   0,
+						"MHS av":   0,
+						"Accepted": 0,
+						"Rejected": 0,
+						"Hardware Errors": 0,
+						"Elapsed": 0,
+					}
+					// Keep the error but it will be treated as "disconnected"
+				}
+			}
+		}
+	}
+}
+
 // enrichMinerStatus detects and adds miner status (running, paused, stopped) to results
 func enrichMinerStatus(ctx context.Context, cgClient *client.Client, results []client.Result, activeIPs []string) {
 	if len(activeIPs) == 0 {
 		return
 	}
 
-	// Add status to results based on hashrate, tuner status, and pool status
+	// Add status to results based on hashrate, tuner status, error messages, and pool status
 	for i := range results {
-		if results[i].Error == "" && results[i].Response != nil {
+		if results[i].Response != nil {
+			// Determine status from response data
 			status := determineMinerStatusFromResponse(results[i].Response)
+
+			// Override status if we have a "Disconnected" error
+			if results[i].Error != "" &&
+			   (strings.Contains(results[i].Error, "Disconnected") ||
+			    strings.Contains(results[i].Error, "Code: 302")) {
+				status = "Stopped"
+			}
+
 			addFieldToResponse(&results[i], "miner_status", status)
 		} else if results[i].Error != "" {
-			// Miner is offline - initialize response if nil
+			// Miner is truly offline - initialize response if nil
 			if results[i].Response == nil {
 				results[i].Response = make(map[string]interface{})
 			}
@@ -452,13 +491,16 @@ func extractActiveMiners(results []client.Result) ([]string, map[string]string) 
 	firmwareMap := make(map[string]string)
 
 	for _, r := range results {
-		if r.Error == "" {
+		// Include miners with no error OR miners with "Disconnected" error (they're online but not mining)
+		isActive := r.Error == "" ||
+			strings.Contains(r.Error, "Disconnected") ||
+			strings.Contains(r.Error, "Code: 302")
+
+		if isActive && r.Response != nil {
 			activeIPs = append(activeIPs, r.IP)
-			if r.Response != nil {
-				if respMap, ok := r.Response.(map[string]interface{}); ok {
-					if fw, ok := respMap["firmware"].(string); ok {
-						firmwareMap[r.IP] = fw
-					}
+			if respMap, ok := r.Response.(map[string]interface{}); ok {
+				if fw, ok := respMap["firmware"].(string); ok {
+					firmwareMap[r.IP] = fw
 				}
 			}
 		}

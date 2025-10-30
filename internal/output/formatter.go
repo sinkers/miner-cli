@@ -471,7 +471,13 @@ func (f *ScanFormatter) collectScanStats(results []client.Result) scanStats {
 	var stats scanStats
 
 	for _, result := range results {
-		if result.Error == "" {
+		// Count as active if no error OR has Disconnected error with response
+		isActive := result.Error == "" ||
+			(result.Response != nil &&
+				(strings.Contains(result.Error, "Disconnected") ||
+					strings.Contains(result.Error, "Code: 302")))
+
+		if isActive {
 			stats.activeCount++
 
 			// Extract data for statistics
@@ -717,18 +723,19 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	var rows []tableRow
 
 	for _, result := range results {
-		// Skip failed results unless verbose
-		if result.Error != "" {
+		// Skip truly offline miners (no response) unless verbose
+		// But show miners with Disconnected errors (they're online but stopped)
+		if result.Error != "" && result.Response == nil {
 			if f.Verbose {
 				if hasPortData {
 					rows = append(rows, tableRow{
-						plainValues:   []string{result.IP, "-", "Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
-						coloredValues: []string{white(result.IP), white("-"), red("Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+						plainValues:   []string{result.IP, "-", "✗ Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), white("-"), red("✗ Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
 					})
 				} else {
 					rows = append(rows, tableRow{
-						plainValues:   []string{result.IP, "Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
-						coloredValues: []string{white(result.IP), red("Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+						plainValues:   []string{result.IP, "✗ Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), red("✗ Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
 					})
 				}
 			}
