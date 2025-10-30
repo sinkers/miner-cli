@@ -698,19 +698,19 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	var separatorLine string
 
 	if hasPortData {
-		headers = []string{"IP", "Port", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
+		headers = []string{"IP", "Port", "Status", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
 		headerColors = make([]func(...interface{}) string, len(headers))
 		for i := range headerColors {
 			headerColors[i] = headerColor
 		}
-		separatorLine = cyan("───  ────  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
+		separatorLine = cyan("───  ────  ───────  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
 	} else {
-		headers = []string{"IP", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
+		headers = []string{"IP", "Status", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
 		headerColors = make([]func(...interface{}) string, len(headers))
 		for i := range headerColors {
 			headerColors[i] = headerColor
 		}
-		separatorLine = cyan("───  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
+		separatorLine = cyan("───  ───────  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
 	}
 
 	// Collect all rows
@@ -722,13 +722,13 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			if f.Verbose {
 				if hasPortData {
 					rows = append(rows, tableRow{
-						plainValues:   []string{result.IP, "-", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
-						coloredValues: []string{white(result.IP), white("-"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+						plainValues:   []string{result.IP, "-", "Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), white("-"), red("Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
 					})
 				} else {
 					rows = append(rows, tableRow{
-						plainValues:   []string{result.IP, "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
-						coloredValues: []string{white(result.IP), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+						plainValues:   []string{result.IP, "Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), red("Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
 					})
 				}
 			}
@@ -736,6 +736,7 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 
 		// Extract summary data
+		minerStatus := "-"
 		firmware := "-"
 		switchPort := "-"
 		hashrate := "-"
@@ -751,6 +752,10 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		if jsonBytes, err := json.Marshal(result.Response); err == nil {
 			var respMap map[string]interface{}
 			if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+				// Get miner status
+				if val, ok := respMap["miner_status"]; ok {
+					minerStatus = fmt.Sprintf("%v", val)
+				}
 				// Get firmware info
 				if val, ok := respMap["firmware"]; ok {
 					firmware = fmt.Sprintf("%v", val)
@@ -828,6 +833,38 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 
 		// Color the data based on values
 		ipColor := white(result.IP)
+
+		// Color status based on value
+		statusColor := minerStatus
+		switch minerStatus {
+		case "Running":
+			statusColor = green("● " + minerStatus)
+		case "Paused":
+			statusColor = yellow("⏸ " + minerStatus)
+		case "Stopped":
+			statusColor = red("■ " + minerStatus)
+		case "Offline":
+			statusColor = red("✗ " + minerStatus)
+		case "Unknown":
+			statusColor = white("? " + minerStatus)
+		default:
+			statusColor = white(minerStatus)
+		}
+
+		// Update plain status for display width calculations
+		statusDisplay := minerStatus
+		switch minerStatus {
+		case "Running":
+			statusDisplay = "● " + minerStatus
+		case "Paused":
+			statusDisplay = "⏸ " + minerStatus
+		case "Stopped":
+			statusDisplay = "■ " + minerStatus
+		case "Offline":
+			statusDisplay = "✗ " + minerStatus
+		case "Unknown":
+			statusDisplay = "? " + minerStatus
+		}
 
 		// Color firmware based on type
 		firmwareColor := firmware
@@ -910,13 +947,13 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 
 		if hasPortData {
 			rows = append(rows, tableRow{
-				plainValues:   []string{result.IP, switchPort, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
-				coloredValues: []string{ipColor, white(switchPort), firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
+				plainValues:   []string{result.IP, switchPort, statusDisplay, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
+				coloredValues: []string{ipColor, white(switchPort), statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
 			})
 		} else {
 			rows = append(rows, tableRow{
-				plainValues:   []string{result.IP, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
-				coloredValues: []string{ipColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
+				plainValues:   []string{result.IP, statusDisplay, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
+				coloredValues: []string{ipColor, statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
 			})
 		}
 	}
