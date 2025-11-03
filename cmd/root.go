@@ -258,14 +258,31 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	// Detect miner status (running, paused, stopped) - must be after enrichMinerData
 	enrichMinerStatus(ctx, cgClient, results, activeIPs)
 
+	// Filter results to only show actual devices (not offline/non-existent IPs)
+	// This removes IPs where no device exists at all
+	filteredResults := make([]client.Result, 0, len(results))
+	for _, r := range results {
+		// Include devices that:
+		// 1. Have no error (successful response), OR
+		// 2. Have a "Disconnected" or "Code: 302" error (online but stopped/paused)
+		// Exclude truly offline devices that never responded
+		isOnline := r.Error == "" ||
+			strings.Contains(r.Error, "Disconnected") ||
+			strings.Contains(r.Error, "Code: 302")
+
+		if isOnline {
+			filteredResults = append(filteredResults, r)
+		}
+	}
+
 	if outputFormat == outputFormatJSON {
 		formatter := output.GetFormatter(outputFormat, verbose)
-		return formatter.Format(results)
+		return formatter.Format(filteredResults)
 	}
 
 	// Use the new scan formatter for better output
 	formatter := output.GetFormatter("scan", verbose)
-	return formatter.Format(results)
+	return formatter.Format(filteredResults)
 }
 
 // enrichFirmwareInfo detects and adds firmware information to results
