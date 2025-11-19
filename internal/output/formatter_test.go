@@ -445,3 +445,76 @@ func BenchmarkTableFormatter(b *testing.B) {
 		})
 	}
 }
+
+func TestExtractPortNumber(t *testing.T) {
+	tests := []struct {
+		name     string
+		portStr  string
+		expected int
+	}{
+		{
+			name:     "FastEthernet simple port",
+			portStr:  "Fa0/11",
+			expected: 11,
+		},
+		{
+			name:     "FastEthernet port 24",
+			portStr:  "Fa0/24",
+			expected: 24,
+		},
+		{
+			name:     "GigabitEthernet with module",
+			portStr:  "Gi1/0/24",
+			expected: 24,
+		},
+		{
+			name:     "GigabitEthernet simple",
+			portStr:  "Gi0/5",
+			expected: 5,
+		},
+		{
+			name:     "TenGigabitEthernet",
+			portStr:  "Te1/1/10",
+			expected: 10,
+		},
+		{
+			name:     "Single digit port",
+			portStr:  "Fa0/1",
+			expected: 1,
+		},
+		{
+			name:     "Large port number",
+			portStr:  "Gi1/0/48",
+			expected: 48,
+		},
+		{
+			name:     "No slash",
+			portStr:  "Invalid",
+			expected: 0,
+		},
+		{
+			name:     "Empty string",
+			portStr:  "",
+			expected: 0,
+		},
+		{
+			name:     "Trailing slash",
+			portStr:  "Fa0/",
+			expected: 0,
+		},
+		{
+			name:     "Non-numeric after slash",
+			portStr:  "Fa0/abc",
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractPortNumber(tt.portStr)
+			if result != tt.expected {
+				t.Errorf("extractPortNumber(%q) = %d, want %d", tt.portStr, result, tt.expected)
+			}
+		})
+	}
+}

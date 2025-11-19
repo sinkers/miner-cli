@@ -365,6 +365,24 @@ func ipToInt(ipStr string) uint32 {
 	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
 }
 
+// extractPortNumber extracts the numeric port number from switch port strings
+// e.g., "Fa0/11" returns 11, "Gi1/0/24" returns 24
+func extractPortNumber(portStr string) int {
+	// Find the last occurrence of '/' and extract the number after it
+	lastSlash := strings.LastIndex(portStr, "/")
+	if lastSlash == -1 || lastSlash == len(portStr)-1 {
+		return 0
+	}
+
+	numStr := portStr[lastSlash+1:]
+	var portNum int
+	_, err := fmt.Sscanf(numStr, "%d", &portNum)
+	if err != nil {
+		return 0
+	}
+	return portNum
+}
+
 // toFloat64 safely converts an interface{} to float64
 func toFloat64(v interface{}) float64 {
 	switch val := v.(type) {
@@ -659,11 +677,6 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	boldMagenta := color.New(color.FgMagenta, color.Bold).SprintFunc()
 	boldRed := color.New(color.FgRed, color.Bold).SprintFunc()
 
-	// Sort results by IP
-	sort.Slice(results, func(i, j int) bool {
-		return ipToInt(results[i].IP) < ipToInt(results[j].IP)
-	})
-
 	// Collect statistics
 	stats := f.collectScanStats(results)
 
@@ -693,6 +706,54 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 				}
 			}
 		}
+	}
+
+	// Sort results - by switch port number if available, otherwise by IP
+	if hasPortData {
+		sort.Slice(results, func(i, j int) bool {
+			// Extract switch ports from both results
+			portI := ""
+			portJ := ""
+
+			if results[i].Response != nil {
+				if jsonBytes, err := json.Marshal(results[i].Response); err == nil {
+					var respMap map[string]interface{}
+					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+						if val, ok := respMap["switch_port"]; ok {
+							portI = fmt.Sprintf("%v", val)
+						}
+					}
+				}
+			}
+
+			if results[j].Response != nil {
+				if jsonBytes, err := json.Marshal(results[j].Response); err == nil {
+					var respMap map[string]interface{}
+					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+						if val, ok := respMap["switch_port"]; ok {
+							portJ = fmt.Sprintf("%v", val)
+						}
+					}
+				}
+			}
+
+			// Extract port numbers
+			numI := extractPortNumber(portI)
+			numJ := extractPortNumber(portJ)
+
+			// If both have valid port numbers, sort by port number
+			if numI > 0 && numJ > 0 {
+				return numI < numJ
+			}
+
+			// Otherwise fall back to IP sorting
+			return ipToInt(results[i].IP) < ipToInt(results[j].IP)
+		})
+	} else {
+		// No switch data, sort by IP
+		sort.Slice(results, func(i, j int) bool {
+			return ipToInt(results[i].IP) < ipToInt(results[j].IP)
+		})
 	}
 
 	// Color for table header

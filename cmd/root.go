@@ -43,6 +43,13 @@ var (
 const (
 	Version          = "1.0.0"
 	outputFormatJSON = "json"
+
+	// Miner status constants
+	statusRunning = "Running"
+	statusPaused  = "Paused"
+	statusStopped = "Stopped"
+	statusOffline = "Offline"
+	statusUnknown = "Unknown"
 )
 
 var rootCmd = &cobra.Command{
