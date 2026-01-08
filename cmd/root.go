@@ -263,7 +263,7 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	enrichMinerData(ctx, cgClient, results, activeIPs, firmwareMap, macAddresses, portMap, arpCache)
 
 	// Detect miner status (running, paused, stopped) - must be after enrichMinerData
-	enrichMinerStatus(ctx, cgClient, results, activeIPs)
+	enrichMinerStatus(results, activeIPs)
 
 	// Filter results to only show actual devices (not offline/non-existent IPs)
 	// This removes IPs where no device exists at all
@@ -333,7 +333,7 @@ func enrichBraiinsMiners(results []client.Result) {
 }
 
 // enrichMinerStatus detects and adds miner status (running, paused, stopped) to results
-func enrichMinerStatus(ctx context.Context, cgClient *client.Client, results []client.Result, activeIPs []string) {
+func enrichMinerStatus(results []client.Result, activeIPs []string) {
 	if len(activeIPs) == 0 {
 		return
 	}
@@ -348,7 +348,7 @@ func enrichMinerStatus(ctx context.Context, cgClient *client.Client, results []c
 			if results[i].Error != "" &&
 			   (strings.Contains(results[i].Error, "Disconnected") ||
 			    strings.Contains(results[i].Error, "Code: 302")) {
-				status = "Stopped"
+				status = statusStopped
 			}
 
 			addFieldToResponse(&results[i], "miner_status", status)
@@ -357,7 +357,7 @@ func enrichMinerStatus(ctx context.Context, cgClient *client.Client, results []c
 			if results[i].Response == nil {
 				results[i].Response = make(map[string]interface{})
 			}
-			addFieldToResponse(&results[i], "miner_status", "Offline")
+			addFieldToResponse(&results[i], "miner_status", statusOffline)
 		}
 	}
 }
@@ -369,10 +369,10 @@ func determineMinerStatusFromResponse(response interface{}) string {
 		// Try to convert to map
 		b, err := json.Marshal(response)
 		if err != nil {
-			return "Unknown"
+			return statusUnknown
 		}
 		if err := json.Unmarshal(b, &respMap); err != nil {
-			return "Unknown"
+			return statusUnknown
 		}
 	}
 
@@ -405,84 +405,19 @@ func determineMinerStatusFromResponse(response interface{}) string {
 	// Determine status based on hashrate and tuner status
 	if hashrate > 100 {
 		// Miner is actively hashing
-		return "Running"
+		return statusRunning
 	} else if hashrate == 0 && (tunerStatus == "DISABLED" || tunerStatus == "PAUSED") {
 		// Braiins miner with disabled/paused tuner (manually paused)
-		return "Paused"
+		return statusPaused
 	} else if hashrate < 100 && hashrate > 0 {
 		// Very low hashrate, likely starting up or having issues
-		return "Stopped"
+		return statusStopped
 	} else if hashrate == 0 {
 		// No hashrate but responding (pools might be dead or disabled)
-		return "Stopped"
+		return statusStopped
 	}
 
-	return "Running"
-}
-
-// determineMinerStatus analyzes pool data to determine if miner is running, paused, or stopped
-func determineMinerStatus(poolResponse interface{}) string {
-	b, err := json.Marshal(poolResponse)
-	if err != nil {
-		return "Unknown"
-	}
-
-	var pools []map[string]interface{}
-	if err := json.Unmarshal(b, &pools); err != nil {
-		// Try as single pool
-		var pool map[string]interface{}
-		if err := json.Unmarshal(b, &pool); err != nil {
-			return "Unknown"
-		}
-		pools = []map[string]interface{}{pool}
-	}
-
-	if len(pools) == 0 {
-		return "Unknown"
-	}
-
-	activeCount := 0
-	disabledCount := 0
-	deadCount := 0
-
-	for _, pool := range pools {
-		// Check pool status
-		statusStr := ""
-		if status, ok := pool["Status"]; ok {
-			statusStr = strings.ToUpper(fmt.Sprintf("%v", status))
-		}
-
-		// Check if pool is enabled
-		enabled := true
-		if stratum, ok := pool["Stratum Active"]; ok {
-			if active, ok := stratum.(bool); ok {
-				enabled = active
-			} else if activeStr, ok := stratum.(string); ok {
-				enabled = strings.ToLower(activeStr) == "true"
-			}
-		}
-
-		if statusStr == "ALIVE" || statusStr == "ACTIVE" {
-			activeCount++
-		} else if statusStr == "DEAD" || statusStr == "SICK" {
-			deadCount++
-		}
-
-		if !enabled {
-			disabledCount++
-		}
-	}
-
-	// Determine overall status
-	if activeCount > 0 {
-		return "Running"
-	} else if disabledCount == len(pools) {
-		return "Paused"
-	} else if deadCount > 0 {
-		return "Stopped"
-	}
-
-	return "Unknown"
+	return statusRunning
 }
 
 // setupSwitchMapping initializes switch port mapping if requested
@@ -934,74 +869,6 @@ func getBraiinsStats(ip string) (BraiinsStats, bool) {
 	stats.Tuning = (status == "TUNING" || status == "TESTING")
 
 	return stats, true
-}
-
-// getBraiinsPoolStatus queries the Braiins OS GraphQL API for pool status
-func getBraiinsPoolStatus(ip string) (string, bool) {
-	client := &http.Client{Timeout: 2 * time.Second}
-
-	query := `{"query":"{ bosminer { pools { all { url isEnabled state { isMining } } } } }"}`
-
-	resp, err := client.Post(
-		fmt.Sprintf("http://%s/graphql", ip),
-		"application/json",
-		strings.NewReader(query),
-	)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Data struct {
-			Bosminer struct {
-				Pools struct {
-					All []struct {
-						URL       string `json:"url"`
-						IsEnabled bool   `json:"isEnabled"`
-						State     struct {
-							IsMining bool `json:"isMining"`
-						} `json:"state"`
-					} `json:"all"`
-				} `json:"pools"`
-			} `json:"bosminer"`
-		} `json:"data"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", false
-	}
-
-	pools := result.Data.Bosminer.Pools.All
-	if len(pools) == 0 {
-		return "Unknown", true
-	}
-
-	activeCount := 0
-	disabledCount := 0
-	miningCount := 0
-
-	for _, pool := range pools {
-		if pool.IsEnabled {
-			activeCount++
-			if pool.State.IsMining {
-				miningCount++
-			}
-		} else {
-			disabledCount++
-		}
-	}
-
-	// Determine status
-	if miningCount > 0 {
-		return "Running", true
-	} else if activeCount > 0 && miningCount == 0 {
-		return "Stopped", true
-	} else if disabledCount == len(pools) {
-		return "Paused", true
-	}
-
-	return "Unknown", true
 }
 
 // getBraaiinsMACAddress retrieves MAC address from Braiins miner via gRPC

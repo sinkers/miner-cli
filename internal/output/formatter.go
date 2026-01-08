@@ -15,6 +15,14 @@ import (
 	"github.com/sinkers/miner-cli/internal/client"
 )
 
+const (
+	statusRunning = "Running"
+	statusPaused  = "Paused"
+	statusStopped = "Stopped"
+	statusOffline = "Offline"
+	statusUnknown = "Unknown"
+)
+
 type Formatter interface {
 	Format(results []client.Result) error
 }
@@ -709,52 +717,7 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	}
 
 	// Sort results - by switch port number if available, otherwise by IP
-	if hasPortData {
-		sort.Slice(results, func(i, j int) bool {
-			// Extract switch ports from both results
-			portI := ""
-			portJ := ""
-
-			if results[i].Response != nil {
-				if jsonBytes, err := json.Marshal(results[i].Response); err == nil {
-					var respMap map[string]interface{}
-					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
-						if val, ok := respMap["switch_port"]; ok {
-							portI = fmt.Sprintf("%v", val)
-						}
-					}
-				}
-			}
-
-			if results[j].Response != nil {
-				if jsonBytes, err := json.Marshal(results[j].Response); err == nil {
-					var respMap map[string]interface{}
-					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
-						if val, ok := respMap["switch_port"]; ok {
-							portJ = fmt.Sprintf("%v", val)
-						}
-					}
-				}
-			}
-
-			// Extract port numbers
-			numI := extractPortNumber(portI)
-			numJ := extractPortNumber(portJ)
-
-			// If both have valid port numbers, sort by port number
-			if numI > 0 && numJ > 0 {
-				return numI < numJ
-			}
-
-			// Otherwise fall back to IP sorting
-			return ipToInt(results[i].IP) < ipToInt(results[j].IP)
-		})
-	} else {
-		// No switch data, sort by IP
-		sort.Slice(results, func(i, j int) bool {
-			return ipToInt(results[i].IP) < ipToInt(results[j].IP)
-		})
-	}
+	f.sortResultsByPortOrIP(results, hasPortData)
 
 	// Color for table header
 	headerColor := color.New(color.FgCyan, color.Bold).SprintFunc()
@@ -804,224 +767,31 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 
 		// Extract summary data
-		minerStatus := "-"
-		firmware := "-"
-		switchPort := "-"
-		hashrate := "-"
-		powerKW := "-"
-		chipTemp := "-"
-		tuning := "-"
-		accepted := "-"
-		rejected := "-"
-		hwErrors := "-"
-		uptime := "-"
+		data := f.extractMinerData(result)
 
-		// Convert response to map for easy access
-		if jsonBytes, err := json.Marshal(result.Response); err == nil {
-			var respMap map[string]interface{}
-			if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
-				// Get miner status
-				if val, ok := respMap["miner_status"]; ok {
-					minerStatus = fmt.Sprintf("%v", val)
-				}
-				// Get firmware info
-				if val, ok := respMap["firmware"]; ok {
-					firmware = fmt.Sprintf("%v", val)
-				}
-				// Get switch port info
-				if val, ok := respMap["switch_port"]; ok {
-					switchPort = fmt.Sprintf("%v", val)
-				}
-				// Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
-				if val, ok := respMap["MHS 5s"]; ok {
-					mhs := toFloat64(val)
-					hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
-				} else if val, ok := respMap["MHS av"]; ok {
-					mhs := toFloat64(val)
-					hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
-				} else if val, ok := respMap["GHS 5s"]; ok {
-					// Some miners report in GH/s directly
-					hashrate = fmt.Sprintf("%.2f", toFloat64(val))
-				} else if val, ok := respMap["GHS av"]; ok {
-					hashrate = fmt.Sprintf("%.2f", toFloat64(val))
-				}
-
-				// Chip temperature (prefer explicitly attached value)
-				if val, ok := respMap["chip_temp_c"]; ok {
-					chipTemp = fmt.Sprintf("%.1f", toFloat64(val))
-				} else {
-					if t, ok := extractTempFromSummary(respMap); ok {
-						chipTemp = fmt.Sprintf("%.1f", t)
-					}
-				}
-
-				// Power consumption (Braiins miners only)
-				if val, ok := respMap["power_w"]; ok {
-					powerW := toFloat64(val)
-					powerKW = fmt.Sprintf("%.2f", powerW/1000.0)
-				}
-
-				// Tuning status (Braiins miners only)
-				if val, ok := respMap["tuning"]; ok {
-					if isTuning, ok := val.(bool); ok && isTuning {
-						tuning = "Yes"
-					} else {
-						// Show tuner status if available
-						if status, ok := respMap["tuner_status"].(string); ok && status != "" {
-							tuning = status
-						}
-					}
-				}
-
-				if val, ok := respMap["Accepted"]; ok {
-					accepted = fmt.Sprintf("%v", val)
-				}
-				if val, ok := respMap["Rejected"]; ok {
-					rejected = fmt.Sprintf("%v", val)
-				}
-				if val, ok := respMap["Hardware Errors"]; ok {
-					hwErrors = fmt.Sprintf("%v", val)
-				}
-				if val, ok := respMap["Elapsed"]; ok {
-					// Convert seconds to human-readable format
-					seconds := int(toFloat64(val))
-					days := seconds / 86400
-					hours := (seconds % 86400) / 3600
-					minutes := (seconds % 3600) / 60
-					if days > 0 {
-						uptime = fmt.Sprintf("%dd %dh", days, hours)
-					} else if hours > 0 {
-						uptime = fmt.Sprintf("%dh %dm", hours, minutes)
-					} else {
-						uptime = fmt.Sprintf("%dm", minutes)
-					}
-				}
-			}
+		// Colorize the data
+		colors := colorFuncs{
+			green:       green,
+			red:         red,
+			yellow:      yellow,
+			cyan:        cyan,
+			magenta:     magenta,
+			blue:        blue,
+			white:       white,
+			boldRed:     boldRed,
+			boldMagenta: boldMagenta,
 		}
-
-		// Color the data based on values
-		ipColor := white(result.IP)
-
-		// Color status based on value
-		statusColor := minerStatus
-		switch minerStatus {
-		case "Running":
-			statusColor = green("● " + minerStatus)
-		case "Paused":
-			statusColor = yellow("⏸ " + minerStatus)
-		case "Stopped":
-			statusColor = red("■ " + minerStatus)
-		case "Offline":
-			statusColor = red("✗ " + minerStatus)
-		case "Unknown":
-			statusColor = white("? " + minerStatus)
-		default:
-			statusColor = white(minerStatus)
-		}
-
-		// Update plain status for display width calculations
-		statusDisplay := minerStatus
-		switch minerStatus {
-		case "Running":
-			statusDisplay = "● " + minerStatus
-		case "Paused":
-			statusDisplay = "⏸ " + minerStatus
-		case "Stopped":
-			statusDisplay = "■ " + minerStatus
-		case "Offline":
-			statusDisplay = "✗ " + minerStatus
-		case "Unknown":
-			statusDisplay = "? " + minerStatus
-		}
-
-		// Color firmware based on type
-		firmwareColor := firmware
-		if strings.Contains(firmware, "Braiins") {
-			firmwareColor = blue(firmware)
-		} else if firmware == "Stock" {
-			firmwareColor = white(firmware)
-		}
-
-		// Color hashrate
-		hashrateColor := hashrate
-		if hashrate != "-" {
-			hr := toFloat64(strings.TrimSuffix(hashrate, " GH/s"))
-			if hr > 130000 {
-				hashrateColor = boldMagenta(hashrate)
-			} else if hr > 125000 {
-				hashrateColor = magenta(hashrate)
-			} else {
-				hashrateColor = cyan(hashrate)
-			}
-		}
-
-		// Color power
-		powerColor := powerKW
-		if powerKW != "-" {
-			pw := toFloat64(strings.TrimSuffix(powerKW, " kW"))
-			if pw > 4.2 {
-				powerColor = red(powerKW)
-			} else {
-				powerColor = yellow(powerKW)
-			}
-		}
-
-		// Color temperature based on value
-		tempColor := chipTemp
-		if chipTemp != "-" {
-			temp := toFloat64(strings.TrimSuffix(chipTemp, "°C"))
-			if temp > 75 {
-				tempColor = boldRed(chipTemp)
-			} else if temp > 65 {
-				tempColor = yellow(chipTemp)
-			} else {
-				tempColor = green(chipTemp)
-			}
-		}
-
-		// Color tuning status
-		tuningColor := tuning
-		if tuning == "STABLE" {
-			tuningColor = green("✓ " + tuning)
-		} else if tuning == "Yes" || tuning == "TUNING" {
-			tuningColor = yellow("⚙ " + tuning)
-		} else if tuning != "-" {
-			tuningColor = cyan(tuning)
-		}
-
-		// Color HW errors
-		hwErrorsColor := hwErrors
-		if hwErrors != "-" {
-			errors := toFloat64(hwErrors)
-			if errors > 100 {
-				hwErrorsColor = boldRed(hwErrors)
-			} else if errors > 0 {
-				hwErrorsColor = yellow(hwErrors)
-			} else {
-				hwErrorsColor = green(hwErrors)
-			}
-		}
-
-		// Color uptime
-		uptimeColor := cyan(uptime)
-
-		// Get tuning display text (with or without icons)
-		tuningDisplay := tuning
-		if tuning == "STABLE" {
-			tuningDisplay = "✓ " + tuning
-		} else if tuning == "Yes" || tuning == "TUNING" {
-			tuningDisplay = "⚙ " + tuning
-		}
+		ipColor, statusColor, statusDisplay, firmwareColor, hashrateColor, powerColor, tempColor, tuningDisplay, tuningColor, acceptedColor, rejectedColor, hwErrorsColor, uptimeColor := f.colorizeMinerData(data, result, colors)
 
 		if hasPortData {
 			rows = append(rows, tableRow{
-				plainValues:   []string{result.IP, switchPort, statusDisplay, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
-				coloredValues: []string{ipColor, white(switchPort), statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
+				plainValues:   []string{result.IP, data.switchPort, statusDisplay, data.firmware, data.hashrate, data.powerKW, data.chipTemp, tuningDisplay, data.accepted, data.rejected, data.hwErrors, data.uptime},
+				coloredValues: []string{ipColor, white(data.switchPort), statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, acceptedColor, rejectedColor, hwErrorsColor, uptimeColor},
 			})
 		} else {
 			rows = append(rows, tableRow{
-				plainValues:   []string{result.IP, statusDisplay, firmware, hashrate, powerKW, chipTemp, tuningDisplay, accepted, rejected, hwErrors, uptime},
-				coloredValues: []string{ipColor, statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, white(accepted), white(rejected), hwErrorsColor, uptimeColor},
+				plainValues:   []string{result.IP, statusDisplay, data.firmware, data.hashrate, data.powerKW, data.chipTemp, tuningDisplay, data.accepted, data.rejected, data.hwErrors, data.uptime},
+				coloredValues: []string{ipColor, statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, acceptedColor, rejectedColor, hwErrorsColor, uptimeColor},
 			})
 		}
 	}
@@ -1047,6 +817,291 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	fmt.Printf("\n%s %s\n", green("✨"), bold("Scan completed successfully!"))
 
 	return nil
+}
+
+// minerData holds extracted data from a miner result
+type minerData struct {
+	minerStatus string
+	firmware    string
+	switchPort  string
+	hashrate    string
+	powerKW     string
+	chipTemp    string
+	tuning      string
+	accepted    string
+	rejected    string
+	hwErrors    string
+	uptime      string
+}
+
+// extractMinerData extracts all relevant data from a result
+func (f *ScanFormatter) extractMinerData(result client.Result) minerData {
+	data := minerData{
+		minerStatus: "-",
+		firmware:    "-",
+		switchPort:  "-",
+		hashrate:    "-",
+		powerKW:     "-",
+		chipTemp:    "-",
+		tuning:      "-",
+		accepted:    "-",
+		rejected:    "-",
+		hwErrors:    "-",
+		uptime:      "-",
+	}
+
+	jsonBytes, err := json.Marshal(result.Response)
+	if err != nil {
+		return data
+	}
+
+	var respMap map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &respMap); err != nil {
+		return data
+	}
+
+	// Get miner status
+	if val, ok := respMap["miner_status"]; ok {
+		data.minerStatus = fmt.Sprintf("%v", val)
+	}
+	// Get firmware info
+	if val, ok := respMap["firmware"]; ok {
+		data.firmware = fmt.Sprintf("%v", val)
+	}
+	// Get switch port info
+	if val, ok := respMap["switch_port"]; ok {
+		data.switchPort = fmt.Sprintf("%v", val)
+	}
+
+	// Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
+	if val, ok := respMap["MHS 5s"]; ok {
+		mhs := toFloat64(val)
+		data.hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
+	} else if val, ok := respMap["MHS av"]; ok {
+		mhs := toFloat64(val)
+		data.hashrate = fmt.Sprintf("%.2f", mhs/1000.0) // Convert MH/s to GH/s
+	} else if val, ok := respMap["GHS 5s"]; ok {
+		// Some miners report in GH/s directly
+		data.hashrate = fmt.Sprintf("%.2f", toFloat64(val))
+	} else if val, ok := respMap["GHS av"]; ok {
+		data.hashrate = fmt.Sprintf("%.2f", toFloat64(val))
+	}
+
+	// Chip temperature (prefer explicitly attached value)
+	if val, ok := respMap["chip_temp_c"]; ok {
+		data.chipTemp = fmt.Sprintf("%.1f", toFloat64(val))
+	} else if t, ok := extractTempFromSummary(respMap); ok {
+		data.chipTemp = fmt.Sprintf("%.1f", t)
+	}
+
+	// Power consumption (Braiins miners only)
+	if val, ok := respMap["power_w"]; ok {
+		powerW := toFloat64(val)
+		data.powerKW = fmt.Sprintf("%.2f", powerW/1000.0)
+	}
+
+	// Tuning status (Braiins miners only)
+	if val, ok := respMap["tuning"]; ok {
+		if isTuning, ok := val.(bool); ok && isTuning {
+			data.tuning = "Yes"
+		} else if status, ok := respMap["tuner_status"].(string); ok && status != "" {
+			// Show tuner status if available
+			data.tuning = status
+		}
+	}
+
+	if val, ok := respMap["Accepted"]; ok {
+		data.accepted = fmt.Sprintf("%v", val)
+	}
+	if val, ok := respMap["Rejected"]; ok {
+		data.rejected = fmt.Sprintf("%v", val)
+	}
+	if val, ok := respMap["Hardware Errors"]; ok {
+		data.hwErrors = fmt.Sprintf("%v", val)
+	}
+	if val, ok := respMap["Elapsed"]; ok {
+		// Convert seconds to human-readable format
+		seconds := int(toFloat64(val))
+		days := seconds / 86400
+		hours := (seconds % 86400) / 3600
+		minutes := (seconds % 3600) / 60
+		if days > 0 {
+			data.uptime = fmt.Sprintf("%dd %dh", days, hours)
+		} else if hours > 0 {
+			data.uptime = fmt.Sprintf("%dh %dm", hours, minutes)
+		} else {
+			data.uptime = fmt.Sprintf("%dm", minutes)
+		}
+	}
+
+	return data
+}
+
+// colorFuncs holds color functions for formatting
+type colorFuncs struct {
+	green       func(...interface{}) string
+	red         func(...interface{}) string
+	yellow      func(...interface{}) string
+	cyan        func(...interface{}) string
+	magenta     func(...interface{}) string
+	blue        func(...interface{}) string
+	white       func(...interface{}) string
+	boldRed     func(...interface{}) string
+	boldMagenta func(...interface{}) string
+}
+
+// colorizeMinerData applies color formatting to miner data
+func (f *ScanFormatter) colorizeMinerData(data minerData, result client.Result, colors colorFuncs) (string, string, string, string, string, string, string, string, string, string, string, string, string) {
+	ipColor := colors.white(result.IP)
+
+	// Color status based on value
+	var statusColor string
+	statusDisplay := data.minerStatus
+	switch data.minerStatus {
+	case statusRunning:
+		statusColor = colors.green("● " + data.minerStatus)
+		statusDisplay = "● " + data.minerStatus
+	case statusPaused:
+		statusColor = colors.yellow("⏸ " + data.minerStatus)
+		statusDisplay = "⏸ " + data.minerStatus
+	case statusStopped:
+		statusColor = colors.red("■ " + data.minerStatus)
+		statusDisplay = "■ " + data.minerStatus
+	case statusOffline:
+		statusColor = colors.red("✗ " + data.minerStatus)
+		statusDisplay = "✗ " + data.minerStatus
+	case statusUnknown:
+		statusColor = colors.white("? " + data.minerStatus)
+		statusDisplay = "? " + data.minerStatus
+	default:
+		statusColor = colors.white(data.minerStatus)
+	}
+
+	// Color firmware based on type
+	firmwareColor := data.firmware
+	if strings.Contains(data.firmware, "Braiins") {
+		firmwareColor = colors.blue(data.firmware)
+	} else if data.firmware == "Stock" {
+		firmwareColor = colors.white(data.firmware)
+	}
+
+	// Color hashrate
+	hashrateColor := data.hashrate
+	if data.hashrate != "-" {
+		hr := toFloat64(strings.TrimSuffix(data.hashrate, " GH/s"))
+		if hr > 130000 {
+			hashrateColor = colors.boldMagenta(data.hashrate)
+		} else if hr > 125000 {
+			hashrateColor = colors.magenta(data.hashrate)
+		} else {
+			hashrateColor = colors.cyan(data.hashrate)
+		}
+	}
+
+	// Color power
+	powerColor := data.powerKW
+	if data.powerKW != "-" {
+		pw := toFloat64(strings.TrimSuffix(data.powerKW, " kW"))
+		if pw > 4.2 {
+			powerColor = colors.red(data.powerKW)
+		} else {
+			powerColor = colors.yellow(data.powerKW)
+		}
+	}
+
+	// Color temperature based on value
+	tempColor := data.chipTemp
+	if data.chipTemp != "-" {
+		temp := toFloat64(strings.TrimSuffix(data.chipTemp, "°C"))
+		if temp > 75 {
+			tempColor = colors.boldRed(data.chipTemp)
+		} else if temp > 65 {
+			tempColor = colors.yellow(data.chipTemp)
+		} else {
+			tempColor = colors.green(data.chipTemp)
+		}
+	}
+
+	// Color tuning status
+	tuningDisplay := data.tuning
+	tuningColor := data.tuning
+	if data.tuning == "STABLE" {
+		tuningColor = colors.green("✓ " + data.tuning)
+		tuningDisplay = "✓ " + data.tuning
+	} else if data.tuning == "Yes" || data.tuning == "TUNING" {
+		tuningColor = colors.yellow("⚙ " + data.tuning)
+		tuningDisplay = "⚙ " + data.tuning
+	} else if data.tuning != "-" {
+		tuningColor = colors.cyan(data.tuning)
+	}
+
+	// Color HW errors
+	hwErrorsColor := data.hwErrors
+	if data.hwErrors != "-" {
+		errors := toFloat64(data.hwErrors)
+		if errors > 100 {
+			hwErrorsColor = colors.boldRed(data.hwErrors)
+		} else if errors > 0 {
+			hwErrorsColor = colors.yellow(data.hwErrors)
+		} else {
+			hwErrorsColor = colors.green(data.hwErrors)
+		}
+	}
+
+	// Color uptime
+	uptimeColor := colors.cyan(data.uptime)
+
+	return ipColor, statusColor, statusDisplay, firmwareColor, hashrateColor, powerColor, tempColor, tuningDisplay, tuningColor, colors.white(data.accepted), colors.white(data.rejected), hwErrorsColor, uptimeColor
+}
+
+// sortResultsByPortOrIP sorts results by switch port (if available) or IP
+func (f *ScanFormatter) sortResultsByPortOrIP(results []client.Result, hasPortData bool) {
+	if hasPortData {
+		sort.Slice(results, func(i, j int) bool {
+			// Extract switch ports from both results
+			portI := ""
+			portJ := ""
+
+			if results[i].Response != nil {
+				if jsonBytes, err := json.Marshal(results[i].Response); err == nil {
+					var respMap map[string]interface{}
+					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+						if val, ok := respMap["switch_port"]; ok {
+							portI = fmt.Sprintf("%v", val)
+						}
+					}
+				}
+			}
+
+			if results[j].Response != nil {
+				if jsonBytes, err := json.Marshal(results[j].Response); err == nil {
+					var respMap map[string]interface{}
+					if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+						if val, ok := respMap["switch_port"]; ok {
+							portJ = fmt.Sprintf("%v", val)
+						}
+					}
+				}
+			}
+
+			// Extract port numbers
+			numI := extractPortNumber(portI)
+			numJ := extractPortNumber(portJ)
+
+			// If both have valid port numbers, sort by port number
+			if numI > 0 && numJ > 0 {
+				return numI < numJ
+			}
+
+			// Otherwise fall back to IP sorting
+			return ipToInt(results[i].IP) < ipToInt(results[j].IP)
+		})
+	} else {
+		// No switch data, sort by IP
+		sort.Slice(results, func(i, j int) bool {
+			return ipToInt(results[i].IP) < ipToInt(results[j].IP)
+		})
+	}
 }
 
 // extractTempFromSummary scans a summary response map for plausible
