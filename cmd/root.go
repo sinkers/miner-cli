@@ -357,26 +357,31 @@ func enrichWhatsMiners(results []client.Result) {
 			continue // Not a WhatsMiner or unreachable
 		}
 
-		// Get device info to confirm it's a WhatsMiner
+		// Get device info to confirm it's a WhatsMiner and extract model
 		deviceInfo, err := wmClient.GetDeviceInfo()
-		wmClient.Close()
 		if err != nil || !deviceInfo.IsSuccess() {
+			wmClient.Close()
 			continue
+		}
+
+		// Extract model from device info
+		model := "WhatsMiner"
+		if msg, err := deviceInfo.GetMsg(); err == nil {
+			if miner, ok := msg["miner"].(map[string]interface{}); ok {
+				if minerType, ok := miner["type"].(string); ok {
+					model = fmt.Sprintf("WhatsMiner %s", minerType)
+				}
+			}
 		}
 
 		// Get miner stats
-		wmClient = whatsminer.NewClient(results[i].IP, 4433, "super", "super", 2*time.Second)
-		if err := wmClient.Connect(); err != nil {
-			continue
-		}
-
 		stats, err := wmClient.GetMinerStats()
 		wmClient.Close()
 
 		if err != nil {
 			// Create minimal response even if stats fail
 			results[i].Response = map[string]interface{}{
-				"firmware": "WhatsMiner",
+				"firmware": model,
 				"MHS 5s":   0,
 				"MHS av":   0,
 			}
@@ -389,7 +394,7 @@ func enrichWhatsMiners(results []client.Result) {
 
 		// Create response in CGMiner format for compatibility
 		results[i].Response = map[string]interface{}{
-			"firmware":        fmt.Sprintf("WhatsMiner %s", stats.Model),
+			"firmware":        model,
 			"MHS 5s":          hashrateMHS,
 			"MHS av":          hashrateMHS,
 			"power_w":         stats.Power,

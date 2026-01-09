@@ -37,43 +37,47 @@ func (c *Client) GetMinerStats() (*MinerStats, error) {
 
 	stats := &MinerStats{}
 
+	// The response has a "summary" object inside msg
+	var summary map[string]interface{}
+	if summaryObj, ok := msg["summary"].(map[string]interface{}); ok {
+		summary = summaryObj
+	} else {
+		// Fallback to top-level msg if no summary object
+		summary = msg
+	}
+
 	// Extract hashrate (in TH/s)
-	if hashrate, ok := msg["hash-realtime"].(float64); ok {
+	if hashrate, ok := summary["hash-realtime"].(float64); ok {
 		stats.Hashrate = hashrate
 	}
 
 	// Extract power (in Watts)
-	if power, ok := msg["power-realtime"].(float64); ok {
+	if power, ok := summary["power-realtime"].(float64); ok {
 		stats.Power = power
+	} else if power, ok := summary["power-realtime"].(int); ok {
+		stats.Power = float64(power)
 	}
 
 	// Extract temperature (average chip temp)
-	if temp, ok := msg["chip-temp-avg"].(float64); ok {
+	if temp, ok := summary["chip-temp-avg"].(float64); ok {
 		stats.Temp = temp
 	}
 
 	// Extract per-board temperatures
-	if boards, ok := msg["boards"].([]interface{}); ok {
-		for _, board := range boards {
-			if boardMap, ok := board.(map[string]interface{}); ok {
-				if temp, ok := boardMap["chip-temp-avg"].(float64); ok {
-					stats.TempBoards = append(stats.TempBoards, temp)
-				}
+	if boardTemps, ok := summary["board-temperature"].([]interface{}); ok {
+		for _, temp := range boardTemps {
+			if tempFloat, ok := temp.(float64); ok {
+				stats.TempBoards = append(stats.TempBoards, tempFloat)
 			}
 		}
 	}
 
-	// Extract working status
-	if working, ok := msg["working"].(string); ok {
-		stats.Working = working == "true"
-	} else if working, ok := msg["working"].(bool); ok {
-		stats.Working = working
-	}
+	// Determine working status - if hashrate > 0, it's working
+	stats.Working = stats.Hashrate > 0
 
-	// Extract model
-	if model, ok := msg["type"].(string); ok {
-		stats.Model = model
-	}
+	// Extract model from device info (need separate call)
+	// For now, leave empty - will be populated from device info call
+	stats.Model = ""
 
 	return stats, nil
 }
