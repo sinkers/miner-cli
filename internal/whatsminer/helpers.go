@@ -170,23 +170,39 @@ func GetErrorCodesFromDeviceInfo(deviceInfo *Response) []ErrorCodeInfo {
 	}
 
 	// Error codes are in the "error-code" field
+	// Format: [{"530": "1970-01-01 08:00:26", "reason": "Slot0 not found."}, ...]
 	if errorCodesRaw, ok := msg["error-code"]; ok {
 		if errorCodesArray, ok := errorCodesRaw.([]interface{}); ok {
 			for _, errItem := range errorCodesArray {
 				if errMap, ok := errItem.(map[string]interface{}); ok {
 					errorCode := ErrorCodeInfo{}
 
-					if code, ok := errMap["error_code"].(string); ok {
-						errorCode.ErrorCode = code
-					}
-					if message, ok := errMap["msg"].(string); ok {
-						errorCode.Message = message
-					}
-					if ts, ok := errMap["timestamp"].(float64); ok {
-						errorCode.Timestamp = int64(ts)
+					// Extract the reason/message
+					if reason, ok := errMap["reason"].(string); ok {
+						errorCode.Message = reason
 					}
 
-					errorCodes = append(errorCodes, errorCode)
+					// The error code is a key in the map (not "error_code")
+					// Find the numeric key (e.g., "530", "531")
+					for key, val := range errMap {
+						if key == "reason" {
+							continue
+						}
+						// This is the error code
+						errorCode.ErrorCode = key
+
+						// The value is a timestamp string like "1970-01-01 08:00:26"
+						if tsStr, ok := val.(string); ok {
+							// Parse the timestamp string
+							if t, err := time.Parse("2006-01-02 15:04:05", tsStr); err == nil {
+								errorCode.Timestamp = t.Unix()
+							}
+						}
+					}
+
+					if errorCode.ErrorCode != "" {
+						errorCodes = append(errorCodes, errorCode)
+					}
 				}
 			}
 		}
