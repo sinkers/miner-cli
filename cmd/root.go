@@ -14,6 +14,7 @@ import (
 	"github.com/sinkers/miner-cli/internal/iprange"
 	"github.com/sinkers/miner-cli/internal/output"
 	"github.com/sinkers/miner-cli/internal/snmp"
+	"github.com/sinkers/miner-cli/internal/whatsminer"
 	"github.com/spf13/cobra"
 )
 
@@ -250,6 +251,9 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	// Try to get info from Braiins GraphQL for miners that didn't respond to CGMiner
 	enrichBraiinsMiners(results)
 
+	// Try to get info from WhatsMiner API for devices that didn't respond to CGMiner
+	enrichWhatsMiners(results)
+
 	// Setup switch port mapping if requested
 	portMap, arpCache := setupSwitchMapping()
 
@@ -328,6 +332,79 @@ func enrichBraiinsMiners(results []client.Result) {
 					// Keep the error but it will be treated as "disconnected"
 				}
 			}
+		}
+	}
+}
+
+// enrichWhatsMiners tries to get info from WhatsMiner API for miners that didn't respond to CGMiner
+func enrichWhatsMiners(results []client.Result) {
+	for i := range results {
+		// Skip if already has a successful response or is a known Braiins miner
+		if results[i].Error == "" {
+			continue
+		}
+		if results[i].Response != nil {
+			if fw, ok := results[i].Response.(map[string]interface{})["firmware"]; ok {
+				if fwStr, ok := fw.(string); ok && strings.Contains(fwStr, "Braiins") {
+					continue
+				}
+			}
+		}
+
+		// Try to detect WhatsMiner on port 4433
+		wmClient := whatsminer.NewClient(results[i].IP, 4433, "super", "super", 2*time.Second)
+		if err := wmClient.Connect(); err != nil {
+			continue // Not a WhatsMiner or unreachable
+		}
+
+		// Get device info to confirm it's a WhatsMiner
+		deviceInfo, err := wmClient.GetDeviceInfo()
+		wmClient.Close()
+		if err != nil || !deviceInfo.IsSuccess() {
+			continue
+		}
+
+		// Get miner stats
+		wmClient = whatsminer.NewClient(results[i].IP, 4433, "super", "super", 2*time.Second)
+		if err := wmClient.Connect(); err != nil {
+			continue
+		}
+
+		stats, err := wmClient.GetMinerStats()
+		wmClient.Close()
+
+		if err != nil {
+			// Create minimal response even if stats fail
+			results[i].Response = map[string]interface{}{
+				"firmware": "WhatsMiner",
+				"MHS 5s":   0,
+				"MHS av":   0,
+			}
+			results[i].Error = "" // Clear error since we detected the device
+			continue
+		}
+
+		// Convert TH/s to MH/s for consistency with CGMiner API
+		hashrateMHS := stats.Hashrate * 1000000.0
+
+		// Create response in CGMiner format for compatibility
+		results[i].Response = map[string]interface{}{
+			"firmware":        fmt.Sprintf("WhatsMiner %s", stats.Model),
+			"MHS 5s":          hashrateMHS,
+			"MHS av":          hashrateMHS,
+			"power_w":         stats.Power,
+			"chip_temp_c":     stats.Temp,
+			"Accepted":        0, // Not available from WhatsMiner summary
+			"Rejected":        0,
+			"Hardware Errors": 0,
+			"Elapsed":         0,
+			"working":         stats.Working,
+		}
+		results[i].Error = "" // Clear error since we successfully got data
+
+		// Add status based on working field
+		if !stats.Working {
+			results[i].Error = "Disconnected" // Indicate miner is not mining
 		}
 	}
 }

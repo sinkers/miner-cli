@@ -62,7 +62,8 @@
       "Bash(do echo \"=== Testing $ip ===\")",
       "Bash(for ip in 10.45.17.14 10.45.17.15 10.45.17.16 10.45.17.17 10.45.17.18)",
       "Bash(do echo \"=== $ip ===\")",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "Bash(gh pr merge:*)"
     ],
     "deny": [],
     "ask": []
