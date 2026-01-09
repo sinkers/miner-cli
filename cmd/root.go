@@ -394,12 +394,19 @@ func enrichWhatsMiners(results []client.Result, checkErrors bool) {
 				return
 			}
 
-			// Extract model from device info
+			// Extract model and MAC address from device info
 			model := "WhatsMiner"
+			macAddress := ""
 			if msg, err := deviceInfo.GetMsg(); err == nil {
 				if miner, ok := msg["miner"].(map[string]interface{}); ok {
 					if minerType, ok := miner["type"].(string); ok {
 						model = fmt.Sprintf("WhatsMiner %s", minerType)
+					}
+				}
+				// Extract MAC address from network section
+				if network, ok := msg["network"].(map[string]interface{}); ok {
+					if mac, ok := network["mac"].(string); ok {
+						macAddress = mac
 					}
 				}
 			}
@@ -443,6 +450,11 @@ func enrichWhatsMiners(results []client.Result, checkErrors bool) {
 				"Hardware Errors": 0,
 				"Elapsed":         0,
 				"working":         stats.Working,
+			}
+
+			// Add MAC address if available
+			if macAddress != "" {
+				resp["mac_address"] = macAddress
 			}
 
 			// Add error codes if they exist

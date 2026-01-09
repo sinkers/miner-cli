@@ -674,6 +674,7 @@ func (f *ScanFormatter) printHashrateStats(stats scanStats, cyan, magenta, white
 func (f *ScanFormatter) printErrorCodes(results []client.Result, yellow, red, white, cyan, bold, boldYellow func(a ...interface{}) string) {
 	type minerWithErrors struct {
 		IP         string
+		MAC        string
 		ErrorCodes []map[string]interface{}
 	}
 
@@ -694,8 +695,14 @@ func (f *ScanFormatter) printErrorCodes(results []client.Result, yellow, red, wh
 								}
 							}
 							if len(codes) > 0 {
+								// Extract MAC address if available
+								macAddr := ""
+								if mac, ok := respMap["mac_address"].(string); ok {
+									macAddr = mac
+								}
 								minersWithErrors = append(minersWithErrors, minerWithErrors{
 									IP:         result.IP,
+									MAC:        macAddr,
 									ErrorCodes: codes,
 								})
 							}
@@ -714,7 +721,11 @@ func (f *ScanFormatter) printErrorCodes(results []client.Result, yellow, red, wh
 		fmt.Println(cyan(strings.Repeat("─", 80)))
 
 		for _, miner := range minersWithErrors {
-			fmt.Printf("%s %s\n", bold("Miner:"), white(miner.IP))
+			if miner.MAC != "" {
+				fmt.Printf("%s %s %s %s\n", bold("Miner:"), white(miner.IP), cyan("MAC:"), white(miner.MAC))
+			} else {
+				fmt.Printf("%s %s\n", bold("Miner:"), white(miner.IP))
+			}
 			for i, errCode := range miner.ErrorCodes {
 				code := "Unknown"
 				if ec, ok := errCode["error_code"].(string); ok {
