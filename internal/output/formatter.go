@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/fatih/color"
 	"github.com/sinkers/miner-cli/internal/client"
@@ -735,20 +734,11 @@ func (f *ScanFormatter) printErrorCodes(results []client.Result, yellow, red, wh
 				if msg, ok := errCode["msg"].(string); ok {
 					message = msg
 				}
-				timestamp := ""
-				if ts, ok := errCode["timestamp"].(float64); ok {
-					timestamp = time.Unix(int64(ts), 0).Format("2006-01-02 15:04:05")
-				}
 
 				if message != "" {
-					fmt.Printf("  %s %s %s %s", red(fmt.Sprintf("[%d]", i+1)), yellow("Code:"), red(code), white(fmt.Sprintf("- %s", message)))
+					fmt.Printf("  %s %s %s %s\n", red(fmt.Sprintf("[%d]", i+1)), yellow("Code:"), red(code), white(fmt.Sprintf("- %s", message)))
 				} else {
-					fmt.Printf("  %s %s %s", red(fmt.Sprintf("[%d]", i+1)), yellow("Code:"), red(code))
-				}
-				if timestamp != "" {
-					fmt.Printf(" %s\n", white(fmt.Sprintf("(at %s)", timestamp)))
-				} else {
-					fmt.Println()
+					fmt.Printf("  %s %s %s\n", red(fmt.Sprintf("[%d]", i+1)), yellow("Code:"), red(code))
 				}
 			}
 			fmt.Println()
