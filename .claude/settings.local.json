@@ -65,7 +65,9 @@
       "Bash(go test:*)",
       "Bash(gh pr merge:*)",
       "Bash(go run:*)",
-      "Bash(./test_whatsminer:*)"
+      "Bash(./test_whatsminer:*)",
+      "Bash(cat:*)",
+      "Bash(pkill -f \"miner-cli scan 10.45.78.0/24\")"
     ],
     "deny": [],
     "ask": []

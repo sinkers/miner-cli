@@ -338,6 +338,8 @@ func enrichBraiinsMiners(results []client.Result) {
 
 // enrichWhatsMiners tries to get info from WhatsMiner API for miners that didn't respond to CGMiner
 func enrichWhatsMiners(results []client.Result) {
+	// Find IPs that need WhatsMiner detection
+	var ipsToCheck []int
 	for i := range results {
 		// Skip if already has a successful response or is a known Braiins miner
 		if results[i].Error == "" {
@@ -350,66 +352,110 @@ func enrichWhatsMiners(results []client.Result) {
 				}
 			}
 		}
+		ipsToCheck = append(ipsToCheck, i)
+	}
 
-		// Try to detect WhatsMiner on port 4433
-		wmClient := whatsminer.NewClient(results[i].IP, 4433, "super", "super", 2*time.Second)
-		if err := wmClient.Connect(); err != nil {
-			continue // Not a WhatsMiner or unreachable
-		}
+	if len(ipsToCheck) == 0 {
+		return
+	}
 
-		// Get device info to confirm it's a WhatsMiner and extract model
-		deviceInfo, err := wmClient.GetDeviceInfo()
-		if err != nil || !deviceInfo.IsSuccess() {
-			wmClient.Close()
-			continue
-		}
+	// Use concurrency for WhatsMiner detection
+	type wmResult struct {
+		index    int
+		response map[string]interface{}
+		error    string
+	}
 
-		// Extract model from device info
-		model := "WhatsMiner"
-		if msg, err := deviceInfo.GetMsg(); err == nil {
-			if miner, ok := msg["miner"].(map[string]interface{}); ok {
-				if minerType, ok := miner["type"].(string); ok {
-					model = fmt.Sprintf("WhatsMiner %s", minerType)
+	resultsChan := make(chan wmResult, len(ipsToCheck))
+	maxWorkers := 50 // Limit concurrent connections
+	sem := make(chan struct{}, maxWorkers)
+
+	for _, idx := range ipsToCheck {
+		go func(i int) {
+			sem <- struct{}{} // Acquire semaphore
+			defer func() { <-sem }() // Release semaphore
+
+			ip := results[i].IP
+
+			// Try to detect WhatsMiner on port 4433
+			wmClient := whatsminer.NewClient(ip, 4433, "super", "super", 2*time.Second)
+			if err := wmClient.Connect(); err != nil {
+				resultsChan <- wmResult{index: i}
+				return
+			}
+
+			// Get device info to confirm it's a WhatsMiner and extract model
+			deviceInfo, err := wmClient.GetDeviceInfo()
+			if err != nil || !deviceInfo.IsSuccess() {
+				wmClient.Close()
+				resultsChan <- wmResult{index: i}
+				return
+			}
+
+			// Extract model from device info
+			model := "WhatsMiner"
+			if msg, err := deviceInfo.GetMsg(); err == nil {
+				if miner, ok := msg["miner"].(map[string]interface{}); ok {
+					if minerType, ok := miner["type"].(string); ok {
+						model = fmt.Sprintf("WhatsMiner %s", minerType)
+					}
 				}
 			}
-		}
 
-		// Get miner stats
-		stats, err := wmClient.GetMinerStats()
-		wmClient.Close()
+			// Get miner stats
+			stats, err := wmClient.GetMinerStats()
+			wmClient.Close()
 
-		if err != nil {
-			// Create minimal response even if stats fail
-			results[i].Response = map[string]interface{}{
-				"firmware": model,
-				"MHS 5s":   0,
-				"MHS av":   0,
+			if err != nil {
+				// Create minimal response even if stats fail
+				resultsChan <- wmResult{
+					index: i,
+					response: map[string]interface{}{
+						"firmware": model,
+						"MHS 5s":   0,
+						"MHS av":   0,
+					},
+					error: "",
+				}
+				return
 			}
-			results[i].Error = "" // Clear error since we detected the device
-			continue
-		}
 
-		// Convert TH/s to MH/s for consistency with CGMiner API
-		hashrateMHS := stats.Hashrate * 1000000.0
+			// Convert TH/s to MH/s for consistency with CGMiner API
+			hashrateMHS := stats.Hashrate * 1000000.0
 
-		// Create response in CGMiner format for compatibility
-		results[i].Response = map[string]interface{}{
-			"firmware":        model,
-			"MHS 5s":          hashrateMHS,
-			"MHS av":          hashrateMHS,
-			"power_w":         stats.Power,
-			"chip_temp_c":     stats.Temp,
-			"Accepted":        0, // Not available from WhatsMiner summary
-			"Rejected":        0,
-			"Hardware Errors": 0,
-			"Elapsed":         0,
-			"working":         stats.Working,
-		}
-		results[i].Error = "" // Clear error since we successfully got data
+			// Create response in CGMiner format for compatibility
+			resp := map[string]interface{}{
+				"firmware":        model,
+				"MHS 5s":          hashrateMHS,
+				"MHS av":          hashrateMHS,
+				"power_w":         stats.Power,
+				"chip_temp_c":     stats.Temp,
+				"Accepted":        0, // Not available from WhatsMiner summary
+				"Rejected":        0,
+				"Hardware Errors": 0,
+				"Elapsed":         0,
+				"working":         stats.Working,
+			}
 
-		// Add status based on working field
-		if !stats.Working {
-			results[i].Error = "Disconnected" // Indicate miner is not mining
+			errMsg := ""
+			if !stats.Working {
+				errMsg = "Disconnected" // Indicate miner is not mining
+			}
+
+			resultsChan <- wmResult{
+				index:    i,
+				response: resp,
+				error:    errMsg,
+			}
+		}(idx)
+	}
+
+	// Collect results
+	for range ipsToCheck {
+		result := <-resultsChan
+		if result.response != nil {
+			results[result.index].Response = result.response
+			results[result.index].Error = result.error
 		}
 	}
 }
