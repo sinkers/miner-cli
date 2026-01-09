@@ -152,3 +152,45 @@ func (c *Client) GetMinerModel() (string, error) {
 
 	return "WhatsMiner", nil
 }
+
+// ErrorCodeInfo represents a WhatsMiner error code entry
+type ErrorCodeInfo struct {
+	ErrorCode string `json:"error_code"`
+	Message   string `json:"msg"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+// GetErrorCodes retrieves error codes from the device info response
+func GetErrorCodesFromDeviceInfo(deviceInfo *Response) []ErrorCodeInfo {
+	var errorCodes []ErrorCodeInfo
+
+	msg, err := deviceInfo.GetMsg()
+	if err != nil {
+		return errorCodes
+	}
+
+	// Error codes are in the "error-code" field
+	if errorCodesRaw, ok := msg["error-code"]; ok {
+		if errorCodesArray, ok := errorCodesRaw.([]interface{}); ok {
+			for _, errItem := range errorCodesArray {
+				if errMap, ok := errItem.(map[string]interface{}); ok {
+					errorCode := ErrorCodeInfo{}
+
+					if code, ok := errMap["error_code"].(string); ok {
+						errorCode.ErrorCode = code
+					}
+					if message, ok := errMap["msg"].(string); ok {
+						errorCode.Message = message
+					}
+					if ts, ok := errMap["timestamp"].(float64); ok {
+						errorCode.Timestamp = int64(ts)
+					}
+
+					errorCodes = append(errorCodes, errorCode)
+				}
+			}
+		}
+	}
+
+	return errorCodes
+}

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/fatih/color"
 	"github.com/sinkers/miner-cli/internal/client"
@@ -669,6 +670,82 @@ func (f *ScanFormatter) printHashrateStats(stats scanStats, cyan, magenta, white
 	}
 }
 
+// printErrorCodes displays WhatsMiner error codes if any exist
+func (f *ScanFormatter) printErrorCodes(results []client.Result, yellow, red, white, cyan, bold, boldYellow func(a ...interface{}) string) {
+	type minerWithErrors struct {
+		IP         string
+		ErrorCodes []map[string]interface{}
+	}
+
+	var minersWithErrors []minerWithErrors
+
+	// Collect miners that have error codes
+	for _, result := range results {
+		if result.Response != nil {
+			if jsonBytes, err := json.Marshal(result.Response); err == nil {
+				var respMap map[string]interface{}
+				if err := json.Unmarshal(jsonBytes, &respMap); err == nil {
+					if errorCodes, ok := respMap["error_codes"]; ok {
+						if errorCodesArray, ok := errorCodes.([]interface{}); ok && len(errorCodesArray) > 0 {
+							var codes []map[string]interface{}
+							for _, ec := range errorCodesArray {
+								if ecMap, ok := ec.(map[string]interface{}); ok {
+									codes = append(codes, ecMap)
+								}
+							}
+							if len(codes) > 0 {
+								minersWithErrors = append(minersWithErrors, minerWithErrors{
+									IP:         result.IP,
+									ErrorCodes: codes,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Print error codes section if any exist
+	if len(minersWithErrors) > 0 {
+		fmt.Println()
+		fmt.Println(cyan(strings.Repeat("═", 80)))
+		fmt.Printf("%s %s\n", boldYellow("⚠️  ERROR CODES DETECTED"), yellow(fmt.Sprintf("(%d miner(s) with errors)", len(minersWithErrors))))
+		fmt.Println(cyan(strings.Repeat("─", 80)))
+
+		for _, miner := range minersWithErrors {
+			fmt.Printf("%s %s\n", bold("Miner:"), white(miner.IP))
+			for i, errCode := range miner.ErrorCodes {
+				code := "Unknown"
+				if ec, ok := errCode["error_code"].(string); ok {
+					code = ec
+				}
+				message := ""
+				if msg, ok := errCode["msg"].(string); ok {
+					message = msg
+				}
+				timestamp := ""
+				if ts, ok := errCode["timestamp"].(float64); ok {
+					timestamp = time.Unix(int64(ts), 0).Format("2006-01-02 15:04:05")
+				}
+
+				if message != "" {
+					fmt.Printf("  %s %s %s %s", red(fmt.Sprintf("[%d]", i+1)), yellow("Code:"), red(code), white(fmt.Sprintf("- %s", message)))
+				} else {
+					fmt.Printf("  %s %s %s", red(fmt.Sprintf("[%d]", i+1)), yellow("Code:"), red(code))
+				}
+				if timestamp != "" {
+					fmt.Printf(" %s\n", white(fmt.Sprintf("(at %s)", timestamp)))
+				} else {
+					fmt.Println()
+				}
+			}
+			fmt.Println()
+		}
+		fmt.Println(cyan(strings.Repeat("═", 80)))
+	}
+}
+
 func (f *ScanFormatter) Format(results []client.Result) error {
 	// Color definitions - define all colors at the start
 	green := color.New(color.FgGreen).SprintFunc()
@@ -814,6 +891,10 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 			red("❌ Offline:"),
 			boldRed(fmt.Sprintf("%d", len(results)-stats.activeCount)))
 	}
+
+	// Print error codes if any exist
+	f.printErrorCodes(results, yellow, red, white, cyan, bold, boldYellow)
+
 	fmt.Printf("\n%s %s\n", green("✨"), bold("Scan completed successfully!"))
 
 	return nil

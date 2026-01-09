@@ -165,6 +165,7 @@ func init() {
 
 	// Flag to optionally fetch chip temperatures via a second pass
 	scanCmd.Flags().Bool("scan-temps", false, "Fetch chip temperature via device metrics (slower)")
+	scanCmd.Flags().Bool("check-errors", false, "Check WhatsMiner devices for error codes")
 	scanCmd.Flags().StringVar(&switchIP, "switch", "", "Switch IP address for SNMP port lookup (e.g., 10.110.101.6)")
 	scanCmd.Flags().StringVar(&switchCommunity, "community", "public", "SNMP community string for switch")
 	scanCmd.Flags().StringVar(&braiinsUsername, "braiins-user", "root", "Braiins OS username for MAC address retrieval")
@@ -252,7 +253,8 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	enrichBraiinsMiners(results)
 
 	// Try to get info from WhatsMiner API for devices that didn't respond to CGMiner
-	enrichWhatsMiners(results)
+	checkErrors, _ := cmd.Flags().GetBool("check-errors")
+	enrichWhatsMiners(results, checkErrors)
 
 	// Setup switch port mapping if requested
 	portMap, arpCache := setupSwitchMapping()
@@ -337,7 +339,7 @@ func enrichBraiinsMiners(results []client.Result) {
 }
 
 // enrichWhatsMiners tries to get info from WhatsMiner API for miners that didn't respond to CGMiner
-func enrichWhatsMiners(results []client.Result) {
+func enrichWhatsMiners(results []client.Result, checkErrors bool) {
 	// Find IPs that need WhatsMiner detection
 	var ipsToCheck []int
 	for i := range results {
@@ -402,6 +404,12 @@ func enrichWhatsMiners(results []client.Result) {
 				}
 			}
 
+			// Extract error codes if requested
+			var errorCodes []whatsminer.ErrorCodeInfo
+			if checkErrors {
+				errorCodes = whatsminer.GetErrorCodesFromDeviceInfo(deviceInfo)
+			}
+
 			// Get miner stats
 			stats, err := wmClient.GetMinerStats()
 			wmClient.Close()
@@ -435,6 +443,11 @@ func enrichWhatsMiners(results []client.Result) {
 				"Hardware Errors": 0,
 				"Elapsed":         0,
 				"working":         stats.Working,
+			}
+
+			// Add error codes if they exist
+			if len(errorCodes) > 0 {
+				resp["error_codes"] = errorCodes
 			}
 
 			errMsg := ""
