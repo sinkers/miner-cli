@@ -39,6 +39,9 @@ var (
 	// Braiins authentication for MAC address retrieval
 	braiinsUsername string
 	braiinsPassword string
+
+	// Display options
+	showMAC bool
 )
 
 const (
@@ -91,6 +94,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&workers, "workers", "w", 255, "Number of concurrent workers")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "color", "Output format (color, json, table)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.PersistentFlags().BoolVar(&showMAC, "show-mac", false, "Display MAC addresses in output table")
 
 	commands := client.GetAvailableCommands()
 	for _, cmd := range commands {
@@ -217,7 +221,7 @@ func executeCommand(command string) error {
 		formatToUse = "summary"
 	}
 
-	formatter := output.GetFormatter(formatToUse, verbose)
+	formatter := output.GetFormatter(formatToUse, verbose, showMAC)
 	return formatter.Format(results)
 }
 
@@ -289,12 +293,12 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	}
 
 	if outputFormat == outputFormatJSON {
-		formatter := output.GetFormatter(outputFormat, verbose)
+		formatter := output.GetFormatter(outputFormat, verbose, showMAC)
 		return formatter.Format(filteredResults)
 	}
 
 	// Use the new scan formatter for better output
-	formatter := output.GetFormatter("scan", verbose)
+	formatter := output.GetFormatter("scan", verbose, showMAC)
 	return formatter.Format(filteredResults)
 }
 

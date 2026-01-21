@@ -84,7 +84,7 @@ func TestGetFormatter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.format, func(t *testing.T) {
-			formatter := GetFormatter(tt.format, tt.verbose)
+			formatter := GetFormatter(tt.format, tt.verbose, false)
 
 			switch tt.expected {
 			case "JSONFormatter":

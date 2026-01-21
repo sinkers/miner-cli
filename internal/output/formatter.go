@@ -27,16 +27,16 @@ type Formatter interface {
 	Format(results []client.Result) error
 }
 
-func GetFormatter(format string, verbose bool) Formatter {
+func GetFormatter(format string, verbose bool, showMAC bool) Formatter {
 	switch strings.ToLower(format) {
 	case "json":
 		return &JSONFormatter{Pretty: verbose}
 	case "table":
 		return &TableFormatter{Verbose: verbose}
 	case "summary":
-		return &SummaryTableFormatter{}
+		return &SummaryTableFormatter{ShowMAC: showMAC}
 	case "scan":
-		return &ScanFormatter{Verbose: verbose}
+		return &ScanFormatter{Verbose: verbose, ShowMAC: showMAC}
 	default:
 		return &ColorFormatter{Verbose: verbose}
 	}
@@ -250,7 +250,9 @@ func (f *TableFormatter) Format(results []client.Result) error {
 }
 
 // SummaryTableFormatter formats summary results grouped by subnet
-type SummaryTableFormatter struct{}
+type SummaryTableFormatter struct {
+	ShowMAC bool
+}
 
 func (f *SummaryTableFormatter) Format(results []client.Result) error {
 	// Group results by subnet
@@ -289,8 +291,13 @@ func (f *SummaryTableFormatter) Format(results []client.Result) error {
 
 		// Print subnet header
 		fmt.Fprintf(w, "\n=== Subnet: %s ===\n", subnet)
-		fmt.Fprintln(w, "IP\tAccepted\tMHS 5s\tMHS av\tHardware Errors")
-		fmt.Fprintln(w, "---\t--------\t------\t------\t---------------")
+		if f.ShowMAC {
+			fmt.Fprintln(w, "IP\tMAC\tAccepted\tMHS 5s\tMHS av\tHardware Errors")
+			fmt.Fprintln(w, "---\t-----------------\t--------\t------\t------\t---------------")
+		} else {
+			fmt.Fprintln(w, "IP\tAccepted\tMHS 5s\tMHS av\tHardware Errors")
+			fmt.Fprintln(w, "---\t--------\t------\t------\t---------------")
+		}
 
 		// Sort IPs within subnet
 		sort.Slice(results, func(i, j int) bool {
@@ -303,6 +310,7 @@ func (f *SummaryTableFormatter) Format(results []client.Result) error {
 			mhs5s := "-"
 			mhsAv := "-"
 			hwErrors := "-"
+			macAddress := "-"
 
 			// Extract summary data from response
 			// The response might be a struct or a map depending on how it was processed
@@ -323,16 +331,30 @@ func (f *SummaryTableFormatter) Format(results []client.Result) error {
 					if val, ok := respMap["Hardware Errors"]; ok {
 						hwErrors = fmt.Sprintf("%v", val)
 					}
+					if val, ok := respMap["mac_address"]; ok {
+						macAddress = fmt.Sprintf("%v", val)
+					}
 				}
 			}
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				result.IP,
-				accepted,
-				mhs5s,
-				mhsAv,
-				hwErrors,
-			)
+			if f.ShowMAC {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+					result.IP,
+					macAddress,
+					accepted,
+					mhs5s,
+					mhsAv,
+					hwErrors,
+				)
+			} else {
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+					result.IP,
+					accepted,
+					mhs5s,
+					mhsAv,
+					hwErrors,
+				)
+			}
 		}
 	}
 
@@ -414,6 +436,7 @@ func toFloat64(v interface{}) float64 {
 // ScanFormatter displays scan results with miner details including hashrate
 type ScanFormatter struct {
 	Verbose bool
+	ShowMAC bool
 }
 
 // ansiRegex matches ANSI escape sequences for removing them when calculating display width
@@ -805,13 +828,27 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 	var headerColors []func(...interface{}) string
 	var separatorLine string
 
-	if hasPortData {
+	if hasPortData && f.ShowMAC {
+		headers = []string{"IP", "Port", "MAC", "Status", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
+		headerColors = make([]func(...interface{}) string, len(headers))
+		for i := range headerColors {
+			headerColors[i] = headerColor
+		}
+		separatorLine = cyan("───  ────  ─────────────────  ───────  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
+	} else if hasPortData {
 		headers = []string{"IP", "Port", "Status", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
 		headerColors = make([]func(...interface{}) string, len(headers))
 		for i := range headerColors {
 			headerColors[i] = headerColor
 		}
 		separatorLine = cyan("───  ────  ───────  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
+	} else if f.ShowMAC {
+		headers = []string{"IP", "MAC", "Status", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
+		headerColors = make([]func(...interface{}) string, len(headers))
+		for i := range headerColors {
+			headerColors[i] = headerColor
+		}
+		separatorLine = cyan("───  ─────────────────  ───────  ────────  ───────────────  ──────────  ─────────  ──────  ────────  ────────  ─────────  ──────")
 	} else {
 		headers = []string{"IP", "Status", "Firmware", "Hashrate (GH/s)", "Power (kW)", "Temp (°C)", "Tuning", "Accepted", "Rejected", "HW Errors", "Uptime"}
 		headerColors = make([]func(...interface{}) string, len(headers))
@@ -829,7 +866,17 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		// But show miners with Disconnected errors (they're online but stopped)
 		if result.Error != "" && result.Response == nil {
 			if f.Verbose {
-				if hasPortData {
+				if hasPortData && f.ShowMAC {
+					rows = append(rows, tableRow{
+						plainValues:   []string{result.IP, "-", "-", "✗ Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), white("-"), white("-"), red("✗ Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+					})
+				} else if hasPortData {
+					rows = append(rows, tableRow{
+						plainValues:   []string{result.IP, "-", "✗ Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
+						coloredValues: []string{white(result.IP), white("-"), red("✗ Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
+					})
+				} else if f.ShowMAC {
 					rows = append(rows, tableRow{
 						plainValues:   []string{result.IP, "-", "✗ Offline", "-", "offline", "-", "-", "-", "-", "-", "-", "-"},
 						coloredValues: []string{white(result.IP), white("-"), red("✗ Offline"), white("-"), red("offline"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-"), white("-")},
@@ -861,10 +908,20 @@ func (f *ScanFormatter) Format(results []client.Result) error {
 		}
 		ipColor, statusColor, statusDisplay, firmwareColor, hashrateColor, powerColor, tempColor, tuningDisplay, tuningColor, acceptedColor, rejectedColor, hwErrorsColor, uptimeColor := f.colorizeMinerData(data, result, colors)
 
-		if hasPortData {
+		if hasPortData && f.ShowMAC {
+			rows = append(rows, tableRow{
+				plainValues:   []string{result.IP, data.switchPort, data.macAddress, statusDisplay, data.firmware, data.hashrate, data.powerKW, data.chipTemp, tuningDisplay, data.accepted, data.rejected, data.hwErrors, data.uptime},
+				coloredValues: []string{ipColor, white(data.switchPort), cyan(data.macAddress), statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, acceptedColor, rejectedColor, hwErrorsColor, uptimeColor},
+			})
+		} else if hasPortData {
 			rows = append(rows, tableRow{
 				plainValues:   []string{result.IP, data.switchPort, statusDisplay, data.firmware, data.hashrate, data.powerKW, data.chipTemp, tuningDisplay, data.accepted, data.rejected, data.hwErrors, data.uptime},
 				coloredValues: []string{ipColor, white(data.switchPort), statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, acceptedColor, rejectedColor, hwErrorsColor, uptimeColor},
+			})
+		} else if f.ShowMAC {
+			rows = append(rows, tableRow{
+				plainValues:   []string{result.IP, data.macAddress, statusDisplay, data.firmware, data.hashrate, data.powerKW, data.chipTemp, tuningDisplay, data.accepted, data.rejected, data.hwErrors, data.uptime},
+				coloredValues: []string{ipColor, cyan(data.macAddress), statusColor, firmwareColor, hashrateColor, powerColor, tempColor, tuningColor, acceptedColor, rejectedColor, hwErrorsColor, uptimeColor},
 			})
 		} else {
 			rows = append(rows, tableRow{
@@ -906,6 +963,7 @@ type minerData struct {
 	minerStatus string
 	firmware    string
 	switchPort  string
+	macAddress  string
 	hashrate    string
 	powerKW     string
 	chipTemp    string
@@ -922,6 +980,7 @@ func (f *ScanFormatter) extractMinerData(result client.Result) minerData {
 		minerStatus: "-",
 		firmware:    "-",
 		switchPort:  "-",
+		macAddress:  "-",
 		hashrate:    "-",
 		powerKW:     "-",
 		chipTemp:    "-",
@@ -953,6 +1012,10 @@ func (f *ScanFormatter) extractMinerData(result client.Result) minerData {
 	// Get switch port info
 	if val, ok := respMap["switch_port"]; ok {
 		data.switchPort = fmt.Sprintf("%v", val)
+	}
+	// Get MAC address
+	if val, ok := respMap["mac_address"]; ok {
+		data.macAddress = fmt.Sprintf("%v", val)
 	}
 
 	// Get hashrate (prefer MHS 5s over MHS av, convert MH/s to GH/s)
