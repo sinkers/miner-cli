@@ -14,6 +14,7 @@ import (
 	"github.com/sinkers/miner-cli/internal/iprange"
 	"github.com/sinkers/miner-cli/internal/output"
 	"github.com/sinkers/miner-cli/internal/snmp"
+	"github.com/sinkers/miner-cli/internal/whatsminer"
 	"github.com/spf13/cobra"
 )
 
@@ -38,6 +39,9 @@ var (
 	// Braiins authentication for MAC address retrieval
 	braiinsUsername string
 	braiinsPassword string
+
+	// Display options
+	showMAC bool
 )
 
 const (
@@ -90,6 +94,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&workers, "workers", "w", 255, "Number of concurrent workers")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "color", "Output format (color, json, table)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.PersistentFlags().BoolVar(&showMAC, "show-mac", false, "Display MAC addresses in output table")
 
 	commands := client.GetAvailableCommands()
 	for _, cmd := range commands {
@@ -164,6 +169,7 @@ func init() {
 
 	// Flag to optionally fetch chip temperatures via a second pass
 	scanCmd.Flags().Bool("scan-temps", false, "Fetch chip temperature via device metrics (slower)")
+	scanCmd.Flags().Bool("check-errors", false, "Check WhatsMiner devices for error codes")
 	scanCmd.Flags().StringVar(&switchIP, "switch", "", "Switch IP address for SNMP port lookup (e.g., 10.110.101.6)")
 	scanCmd.Flags().StringVar(&switchCommunity, "community", "public", "SNMP community string for switch")
 	scanCmd.Flags().StringVar(&braiinsUsername, "braiins-user", "root", "Braiins OS username for MAC address retrieval")
@@ -215,7 +221,7 @@ func executeCommand(command string) error {
 		formatToUse = "summary"
 	}
 
-	formatter := output.GetFormatter(formatToUse, verbose)
+	formatter := output.GetFormatter(formatToUse, verbose, showMAC)
 	return formatter.Format(results)
 }
 
@@ -250,6 +256,10 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	// Try to get info from Braiins GraphQL for miners that didn't respond to CGMiner
 	enrichBraiinsMiners(results)
 
+	// Try to get info from WhatsMiner API for devices that didn't respond to CGMiner
+	checkErrors, _ := cmd.Flags().GetBool("check-errors")
+	enrichWhatsMiners(results, checkErrors)
+
 	// Setup switch port mapping if requested
 	portMap, arpCache := setupSwitchMapping()
 
@@ -283,12 +293,12 @@ func scanMiners(cmd *cobra.Command, args []string) error {
 	}
 
 	if outputFormat == outputFormatJSON {
-		formatter := output.GetFormatter(outputFormat, verbose)
+		formatter := output.GetFormatter(outputFormat, verbose, showMAC)
 		return formatter.Format(filteredResults)
 	}
 
 	// Use the new scan formatter for better output
-	formatter := output.GetFormatter("scan", verbose)
+	formatter := output.GetFormatter("scan", verbose, showMAC)
 	return formatter.Format(filteredResults)
 }
 
@@ -328,6 +338,153 @@ func enrichBraiinsMiners(results []client.Result) {
 					// Keep the error but it will be treated as "disconnected"
 				}
 			}
+		}
+	}
+}
+
+// enrichWhatsMiners tries to get info from WhatsMiner API for miners that didn't respond to CGMiner
+func enrichWhatsMiners(results []client.Result, checkErrors bool) {
+	// Find IPs that need WhatsMiner detection
+	var ipsToCheck []int
+	for i := range results {
+		// Skip if already has a successful response or is a known Braiins miner
+		if results[i].Error == "" {
+			continue
+		}
+		if results[i].Response != nil {
+			if fw, ok := results[i].Response.(map[string]interface{})["firmware"]; ok {
+				if fwStr, ok := fw.(string); ok && strings.Contains(fwStr, "Braiins") {
+					continue
+				}
+			}
+		}
+		ipsToCheck = append(ipsToCheck, i)
+	}
+
+	if len(ipsToCheck) == 0 {
+		return
+	}
+
+	// Use concurrency for WhatsMiner detection
+	type wmResult struct {
+		index    int
+		response map[string]interface{}
+		error    string
+	}
+
+	resultsChan := make(chan wmResult, len(ipsToCheck))
+	maxWorkers := 50 // Limit concurrent connections
+	sem := make(chan struct{}, maxWorkers)
+
+	for _, idx := range ipsToCheck {
+		go func(i int) {
+			sem <- struct{}{} // Acquire semaphore
+			defer func() { <-sem }() // Release semaphore
+
+			ip := results[i].IP
+
+			// Try to detect WhatsMiner on port 4433
+			wmClient := whatsminer.NewClient(ip, 4433, "super", "super", 2*time.Second)
+			if err := wmClient.Connect(); err != nil {
+				resultsChan <- wmResult{index: i}
+				return
+			}
+
+			// Get device info to confirm it's a WhatsMiner and extract model
+			deviceInfo, err := wmClient.GetDeviceInfo()
+			if err != nil || !deviceInfo.IsSuccess() {
+				wmClient.Close()
+				resultsChan <- wmResult{index: i}
+				return
+			}
+
+			// Extract model and MAC address from device info
+			model := "WhatsMiner"
+			macAddress := ""
+			if msg, msgErr := deviceInfo.GetMsg(); msgErr == nil {
+				if miner, ok := msg["miner"].(map[string]interface{}); ok {
+					if minerType, ok := miner["type"].(string); ok {
+						model = fmt.Sprintf("WhatsMiner %s", minerType)
+					}
+				}
+				// Extract MAC address from network section
+				if network, ok := msg["network"].(map[string]interface{}); ok {
+					if mac, ok := network["mac"].(string); ok {
+						macAddress = mac
+					}
+				}
+			}
+
+			// Extract error codes if requested
+			var errorCodes []whatsminer.ErrorCodeInfo
+			if checkErrors {
+				errorCodes = whatsminer.GetErrorCodesFromDeviceInfo(deviceInfo)
+			}
+
+			// Get miner stats
+			stats, err := wmClient.GetMinerStats()
+			wmClient.Close()
+
+			if err != nil {
+				// Create minimal response even if stats fail
+				resultsChan <- wmResult{
+					index: i,
+					response: map[string]interface{}{
+						"firmware": model,
+						"MHS 5s":   0,
+						"MHS av":   0,
+					},
+					error: "",
+				}
+				return
+			}
+
+			// Convert TH/s to MH/s for consistency with CGMiner API
+			hashrateMHS := stats.Hashrate * 1000000.0
+
+			// Create response in CGMiner format for compatibility
+			resp := map[string]interface{}{
+				"firmware":        model,
+				"MHS 5s":          hashrateMHS,
+				"MHS av":          hashrateMHS,
+				"power_w":         stats.Power,
+				"chip_temp_c":     stats.Temp,
+				"Accepted":        0, // Not available from WhatsMiner summary
+				"Rejected":        0,
+				"Hardware Errors": 0,
+				"Elapsed":         0,
+				"working":         stats.Working,
+			}
+
+			// Add MAC address if available
+			if macAddress != "" {
+				resp["mac_address"] = macAddress
+			}
+
+			// Add error codes if they exist
+			if len(errorCodes) > 0 {
+				resp["error_codes"] = errorCodes
+			}
+
+			errMsg := ""
+			if !stats.Working {
+				errMsg = "Disconnected" // Indicate miner is not mining
+			}
+
+			resultsChan <- wmResult{
+				index:    i,
+				response: resp,
+				error:    errMsg,
+			}
+		}(idx)
+	}
+
+	// Collect results
+	for range ipsToCheck {
+		result := <-resultsChan
+		if result.response != nil {
+			results[result.index].Response = result.response
+			results[result.index].Error = result.error
 		}
 	}
 }
