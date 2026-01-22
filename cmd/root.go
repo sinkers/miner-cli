@@ -401,7 +401,7 @@ func enrichWhatsMiners(results []client.Result, checkErrors bool) {
 			// Extract model and MAC address from device info
 			model := "WhatsMiner"
 			macAddress := ""
-			if msg, err := deviceInfo.GetMsg(); err == nil {
+			if msg, msgErr := deviceInfo.GetMsg(); msgErr == nil {
 				if miner, ok := msg["miner"].(map[string]interface{}); ok {
 					if minerType, ok := miner["type"].(string); ok {
 						model = fmt.Sprintf("WhatsMiner %s", minerType)

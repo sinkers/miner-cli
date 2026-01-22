@@ -198,7 +198,10 @@ func (c *Client) send(message string) (*Response, error) {
 	}
 
 	// Clear deadlines after successful operation
-	c.conn.SetDeadline(time.Time{})
+	if err := c.conn.SetDeadline(time.Time{}); err != nil {
+		// Log but don't fail - deadline clearing is best effort
+		_ = err
+	}
 
 	// Parse JSON response
 	var response Response
@@ -254,7 +257,7 @@ func (c *Client) GetDeviceInfo() (*Response, error) {
 
 	// Auto-set salt if available
 	if resp.Code == 0 {
-		if msg, err := resp.GetMsg(); err == nil {
+		if msg, msgErr := resp.GetMsg(); msgErr == nil {
 			if salt, ok := msg["salt"].(string); ok {
 				c.SetSalt(salt)
 			}
